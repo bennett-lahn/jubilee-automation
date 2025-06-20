@@ -1,6 +1,6 @@
 """
 Basic Jubilee Test Script
-This script homes the Jubilee motion platform and moves it in a circle twice.
+This script homes the Jubilee motion platform and moves it in a circle twice using G28 arc commands.
 """
 
 import math
@@ -34,30 +34,24 @@ def main():
         machine.safe_z_movement()
         machine.move_to(x=center_x, y=center_y)
         
-        # Circle parameters
-        num_points = 50  # Number of points to approximate the circle
-        theta_step = 2 * math.pi / num_points  # Angle step between points
+        # Calculate starting point on the circle (at 0 degrees)
+        start_x = center_x + radius
+        start_y = center_y
         
-        print("Starting circular motion...")
+        print("Starting circular motion using G28 arc commands...")
         
-        # Perform two complete circles
+        # Perform two complete circles using G28 arc commands
         for circle_num in range(2):
             print(f"Circle {circle_num + 1}/2")
             
-            theta = 0
-            for point in range(num_points + 1):  # +1 to complete the circle
-                # Calculate x, y coordinates on the circle
-                x = center_x + radius * math.cos(theta)
-                y = center_y + radius * math.sin(theta)
-                
-                # Move to the calculated position
-                machine.move_to(x=x, y=y, z=safe_z, s=3000)  # s=3000 is speed in mm/min
-                
-                # Increment angle for next point
-                theta += theta_step
-                
-                # Small delay to make motion visible
-                time.sleep(0.1)
+            # Move to starting point of the circle
+            machine.move_to(x=start_x, y=start_y, z=safe_z)
+            
+            # G28 command for full circle: G28 X<center_x> Y<center_y> I<radius> J0
+            # This creates a full circle centered at (center_x, center_y) with radius
+            gcode_command = f"G28 X{center_x} Y{center_y} I{radius} J0 F3000"
+            print(f"Executing: {gcode_command}")
+            machine.gcode(gcode_command)
             
             print(f"Circle {circle_num + 1} completed!")
             time.sleep(1)  # Pause between circles
