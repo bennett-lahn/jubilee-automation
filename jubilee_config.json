@@ -1,0 +1,42 @@
+{
+    "machine": {
+        "address": "192.168.1.2",
+        "timeout": 30
+    },
+    "scale": {
+        "port": "/dev/ttyUSB0",
+        "baudrate": 9600,
+        "timeout": 1
+    },
+    "trickler": {
+        "config_file": "trickler_config.json",
+        "tool_index": 0,
+        "tool_name": "trickler",
+        "scale_managed_by_trickler": true
+    },
+    "ui": {
+        "well_layout": {
+            "rows": 3,
+            "columns": 3,
+            "well_ids": ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"],
+            "well_positions": {
+                "A1": [50, 50, 0],
+                "A2": [150, 50, 0],
+                "A3": [250, 50, 0],
+                "B1": [50, 150, 0],
+                "B2": [150, 150, 0],
+                "B3": [250, 150, 0],
+                "C1": [50, 250, 0],
+                "C2": [150, 250, 0],
+                "C3": [250, 250, 0]
+            }
+        },
+        "update_interval": 0.5,
+        "touch_friendly": true
+    },
+    "safety": {
+        "max_weight_per_well": 10.0,
+        "emergency_stop_enabled": true,
+        "weight_tolerance": 0.001
+    }
+} 
