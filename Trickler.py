@@ -103,6 +103,39 @@ class Trickler(Tool):
         if target_weight < current_weight:
             raise ToolStateError(f"Error: Target weight {target_weight}g is less than current weight {current_weight}g!")
 
+    def initialize_scale(self):
+        """Initialize the scale for weighing by re-zeroing and taring the container.
+        """
+        if not self.scale or not self.scale.is_connected:
+            raise ToolStateError("Scale is not connected or provided.")
+        
+        try:
+            # Re-zero the scale first
+            self.scale.re_zero()
+            time.sleep(0.5)  # Brief pause for scale to settle
+            
+            # Move container to scale and tare it
+            self.tare_container()
+                
+            print("Scale initialized and tared.")
+            
+        except Exception as e:
+            raise ToolStateError(f"Failed to initialize scale: {e}")
+
+    def tare_container(self):
+        """Move the container to the scale and re-weigh it to account for residue weight changes.
+        
+        This function is called after each measurement to ensure accurate container weight.
+        Currently empty - to be implemented for future container-based weighing systems.
+        """
+        # TODO: Implement container movement to scale
+        # This will involve:
+        # 1. Moving the container to the scale position
+        # 2. Lowering it onto the scale
+        # 3. Re-weighing to get updated container weight
+        # 4. Accounting for any residue that may have accumulated
+        pass
+
     @requires_active_tool
     def dispense_powder(self, amount_mm: float, s: int = 2000):
         """Dispense powder by moving the trickler mechanism a specified amount.
@@ -150,7 +183,7 @@ class Trickler(Tool):
         Dispense powder into a well until a target weight is reached.
 
         This method uses a coarse and fine dispensing strategy to accurately
-        reach the target weight.
+        reach the target weight. The scale is initialized before dispensing begins.
 
         :param location: The location (e.g., a `WeightWell` object) to dispense powder into.
         :type location: Union[WeightWell, Tuple, Location]
@@ -164,7 +197,7 @@ class Trickler(Tool):
         :type coarse_step_mm: float
         :param fine_step_mm: The motor movement amount for each fine dispensing step.
         :type fine_step_mm: float
-        :param settling_time_s: Time to wait for the scale to settle after dispensing.
+        :param settling_time_s: Time to wait for the scale to settle after fine dispensing.
         :type settling_time_s: float
         """
         if not self.scale or not self.scale.is_connected:
@@ -183,36 +216,34 @@ class Trickler(Tool):
             self.current_well = location.labware
             self.check_weight_limit(0, target_weight, location.labware.max_weight)
         
+        # Initialize scale for weighing
+        self.initialize_scale()
+        
         # Start dispensing loop
-        current_weight = self.scale.get_weight()
+        current_weight = self.scale.get_weight(stable=True)  # Get initial stable weight
         
         # Coarse dispensing threshold (e.g., 80% of target for small amounts)
         coarse_threshold = target_weight * 0.8
 
-        # Coarse dispensing
+        print(f"Starting coarse dispensing to {coarse_threshold:.4f} g...")
+        # Coarse dispensing - don't wait for scale to settle
         while current_weight < coarse_threshold:
             self.dispense_powder(coarse_step_mm, s=coarse_speed)
-            # This is for simulation
-            if hasattr(self.scale, '_add_to_simulation_weight'):
-                # use mm_to_g to simulate weight change
-                dispensed_g = coarse_step_mm * self.mm_to_g
-                self.scale._add_to_simulation_weight(dispensed_g)
 
-            time.sleep(settling_time_s)
-            current_weight = self.scale.get_weight()
+            # For coarse dispensing, get weight immediately without waiting for stability
+            current_weight = self.scale.get_weight(stable=False)
             if current_weight >= target_weight:
                 break
 
-        # Fine dispensing
+        print(f"Coarse dispensing complete. Current weight: {current_weight:.4f} g")
+        print(f"Starting fine dispensing to target {target_weight:.4f} g...")
+
+        # Fine dispensing - wait for scale to settle
         while current_weight < target_weight:
             self.dispense_powder(fine_step_mm, s=fine_speed)
-             # This is for simulation
-            if hasattr(self.scale, '_add_to_simulation_weight'):
-                dispensed_g = fine_step_mm * self.mm_to_g
-                self.scale._add_to_simulation_weight(dispensed_g)
                 
-            time.sleep(settling_time_s)
-            current_weight = self.scale.get_weight()
+            time.sleep(settling_time_s)  # Wait for scale to settle
+            current_weight = self.scale.get_weight(stable=True)  # Get stable weight
 
         print(f"Dispensing complete. Final weight: {current_weight:.4f} g (target: {target_weight:.4f} g)")
 
@@ -240,9 +271,7 @@ class Trickler(Tool):
             target_weight = target_weights[i]
             
             print(f"Dispensing to location {i+1}...")
-            if self.scale:
-                self.scale.zero() # Zero the scale for each new well.
-
+            # Scale will be initialized in dispense_to_well for each location
             self.dispense_to_well(location, target_weight)
 
             print("-" * 20)

@@ -3,15 +3,17 @@ from dataclasses import dataclass
 
 from science_jubilee.labware.Labware import Well, WellSet
 
+# TODO: x,y,z coordinates for wells need to be handled properly once their location is decided in hardware
 
 @dataclass
 class WeightWell(Well):
     """A wrapper class for Well that uses weight (in grams) instead of liquid volume.
-    
+
     This class represents a well that can hold powder and tracks weight instead of volume.
     """
-    
+    valid: bool = True           # Whether the well should be used (e.g. contains a mold)
     current_weight: float = 0.0  # Current weight in grams
+    target_weight: float = 0.0   # Target weight in grams
     max_weight: float = None     # Maximum weight capacity in grams
     
     def add_weight(self, weight: float):
@@ -59,6 +61,7 @@ class WeightWellSet(WellSet):
     """A wrapper class for WellSet that works with WeightWell objects.
     
     This class allows for weight-based operations on sets of wells.
+    Use the name of the WeightWell to access the WeightWell object, just like the WellSet class.
     """
     
     def __getitem__(self, id_: Union[str, int]):
