@@ -32,24 +32,23 @@ class ScaleError(Enum):
             ScaleError.E00: "Communications error: A protocol error occurred in communications. Confirm the format, baud rate and parity.",
             ScaleError.E01: "Undefined command error: An undefined command was received. Confirm the command.",
             ScaleError.E02: "Not ready: A received command cannot be processed. (e.g., not in weighing mode or busy)",
-            ScaleError.E03: "Timeout error: The balance did not receive the next character of a command within the time limit.",
+            ScaleError.E03: "Timeout error: The balance did not receive the next character of a command within the time limit (probably 1 second).",
             ScaleError.E04: "Excess characters error: The balance received excessive characters in a command.",
             ScaleError.E06: "Format error: A command includes incorrect data (e.g., numerically incorrect).",
             ScaleError.E07: "Parameter setting error: The received data exceeds the range that the balance can accept.",
-            ScaleError.E11: "Stability error: The balance cannot stabilize due to an environmental problem (vibration, drafts, etc).",
+            ScaleError.E11: "Stability error: The balance cannot stabilize due to an environmental problem (vibration, drafts, etc).", # For this error, press CAL to return to weighing
             ScaleError.E17: "Out of range error: The value entered is beyond the settable range.",
-            ScaleError.E20: "Internal mass error: The internal mass application mechanism does not function properly (FZ-i only).",
-            ScaleError.E21: "Calibration weight error: The calibration weight is too light.",
+            ScaleError.E20: "Calibration weight error: The calibration weight is too heavy. Confirm that the weighing pan is properly installed. Confirm the calibration weight value.",
+            ScaleError.E21: "Calibration weight error: The calibration weight is too light. Confirm that the weighing pan is properly installed. Confirm the calibration weight value.",
             ScaleError.OVERLOAD: "Overload error: The scale is in overload state (OL). Remove the sample from the pan.",
-            ScaleError.BAD_UNIT: "Weighing unit incorrect: The unit is not '  g' as expected.",
+            ScaleError.BAD_UNIT: "Weighing unit incorrect: The unit is not '  g' (grams) as expected. Check the unit on the scale display.",
             ScaleError.BAD_HEADER: "Unexpected header: The header is not appropriate for the command context.",
-            ScaleError.MAX_WEIGHT: "Max weight exceeded: The measured weight exceeds the maximum weight allowed in the mold/container.",
-        }.get(self, "Unknown error code.")
+        }.get(self, "Unknown error code. Check error code on scale display and consult FX-120i manual.")
 
     @staticmethod
     def from_response(resp: str):
         if resp.startswith('EC,'):
-            code = resp[3:6]
+            code = resp[4:7]
             try:
                 return ScaleError[code]
             except KeyError:
@@ -69,6 +68,7 @@ class ScaleOverloadException(ScaleException):
     pass
 
 class ScaleMaxWeightException(ScaleException):
+    # to string: Max weight exceeded: The measured weight exceeds the maximum weight allowed in the mold/container.
     pass
 
 # Data format for weight responses from the scale:
@@ -128,6 +128,11 @@ class Scale:
         """
         return self._is_connected and self.serial and self.serial.is_open
 
+    # TODO: Update to properly handle ACK; some commands send ACK, some don't
+    # Also update to handle some errors without hard fail; i.e. lost command gets resent first before throwing exception
+    # Also, not sure if response would be ACK or ACK + CRLF
+    # Also add an error if returned weight is negative and handling like re-taring
+    # Also add MAX_WEIGHT error handling (add to enum?)
     def _send_command(self, cmd: str, expect_data: bool = False) -> str:
         """
         Send a command to the scale and return the response.
