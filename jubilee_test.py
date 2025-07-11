@@ -17,39 +17,46 @@ def main():
         machine.connect()
         # Home all axes
         print("Homing all axes...")
-        machine.home_all()
+        # machine.home_all()
         print("Homing complete!")
         
         # Wait a moment for homing to complete
-        while not all(machine.axes_homed.values()):
+        while not all(machine.axes_homed):
             time.sleep(1)
         
         # Move to starting position (center of work area)
         center_x = 150  # mm (adjust based on your bed size)
         center_y = 150  # mm (adjust based on your bed size)
         safe_z = 50    # mm (safe height above bed)
-        radius = 30    # mm (circle radius)
+        radius = 90    # mm (circle radius)
         
         print(f"Moving to starting position: X={center_x}, Y={center_y}")
-        machine.safe_z_movement()
+        # Move to safe Z height first (since no deck is loaded)
+        machine.move_to(z=safe_z)
         machine.move_to(x=center_x, y=center_y)
         
         # Calculate starting point on the circle (at 0 degrees)
         start_x = center_x + radius
         start_y = center_y
         
-        print("Starting circular motion using G28 arc commands...")
+        print("Starting circular motion using G2/G3 arc commands...")
         
-        # Perform two complete circles using G28 arc commands
+        # Perform two complete circles using G2/G3 arc commands
         for circle_num in range(2):
             print(f"Circle {circle_num + 1}/2")
             
             # Move to starting point of the circle
             machine.move_to(x=start_x, y=start_y, z=safe_z)
             
-            # G28 command for full circle: G28 X<center_x> Y<center_y> I<radius> J0
-            # This creates a full circle centered at (center_x, center_y) with radius
-            gcode_command = f"G28 X{center_x} Y{center_y} I{radius} J0 F3000"
+            # Create a full circle using G2 (clockwise) or G3 (counterclockwise)
+            # G2/G3 X<end_x> Y<end_y> I<offset_x> J<offset_y> F<feedrate>
+            # For a full circle, end point = start point, and I/J are the center offset from start
+            end_x = start_x  # End where we started
+            end_y = start_y
+            i_offset = -radius  # Center is radius distance in negative X from start point
+            j_offset = 0       # Center is at same Y as start point
+            
+            gcode_command = f"G2 X{end_x} Y{end_y} I{i_offset} J{j_offset} F3000"
             print(f"Executing: {gcode_command}")
             machine.gcode(gcode_command)
             
