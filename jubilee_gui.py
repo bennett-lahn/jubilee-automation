@@ -37,12 +37,115 @@ import time
 import json
 from typing import List, Dict, Optional
 from dataclasses import dataclass
+import os
+import sys
+import subprocess
 
 # Import Jubilee components
 from science_jubilee.Machine import Machine
 from Trickler import Trickler
 from Scale import Scale
 from trickler_labware import WeightWell, WeightWellSet
+
+# Virtual Keyboard Management Class
+class VirtualKeyboardManager:
+    """Manages virtual keyboard visibility on Raspbian"""
+    
+    def __init__(self):
+        self.keyboard_process = None
+        self.keyboard_name = None
+        self._detect_keyboard()
+    
+    def _detect_keyboard(self):
+        """Detect available virtual keyboards on the system"""
+        try:
+            # Common virtual keyboard names on Raspbian
+            possible_keyboards = [
+                'matchbox-keyboard',
+                'florence',
+                'onboard',
+                'xvkbd',
+                'gok'
+            ]
+            
+            for keyboard in possible_keyboards:
+                result = subprocess.run(['which', keyboard], 
+                                      capture_output=True, text=True)
+                if result.returncode == 0:
+                    self.keyboard_name = keyboard
+                    print(f"Detected virtual keyboard: {keyboard}")
+                    break
+            
+            if not self.keyboard_name:
+                print("No virtual keyboard detected. Install one with: sudo apt install matchbox-keyboard")
+                
+        except Exception as e:
+            print(f"Error detecting keyboard: {e}")
+    
+    def show_keyboard(self):
+        """Show the virtual keyboard"""
+        if not self.keyboard_name:
+            print("No virtual keyboard available")
+            return False
+        
+        try:
+            # Kill any existing keyboard process
+            self.hide_keyboard()
+            
+            # Start new keyboard process
+            if self.keyboard_name == 'matchbox-keyboard':
+                self.keyboard_process = subprocess.Popen([
+                    'matchbox-keyboard', '--xid'
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            elif self.keyboard_name == 'florence':
+                self.keyboard_process = subprocess.Popen([
+                    'florence', '--geometry', '800x300+0+0'
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            elif self.keyboard_name == 'onboard':
+                self.keyboard_process = subprocess.Popen([
+                    'onboard', '--xid'
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            else:
+                self.keyboard_process = subprocess.Popen([self.keyboard_name])
+            
+            print(f"Virtual keyboard ({self.keyboard_name}) shown")
+            return True
+            
+        except Exception as e:
+            print(f"Error showing keyboard: {e}")
+            return False
+    
+    def hide_keyboard(self):
+        """Hide the virtual keyboard"""
+        try:
+            if self.keyboard_process:
+                self.keyboard_process.terminate()
+                self.keyboard_process.wait(timeout=2)
+                self.keyboard_process = None
+                print("Virtual keyboard hidden")
+            
+            # Also try to kill any remaining keyboard processes
+            if self.keyboard_name:
+                subprocess.run(['pkill', '-f', self.keyboard_name], 
+                             capture_output=True)
+                
+        except Exception as e:
+            print(f"Error hiding keyboard: {e}")
+    
+    def is_keyboard_visible(self):
+        """Check if keyboard is currently visible"""
+        if not self.keyboard_name:
+            return False
+        
+        try:
+            result = subprocess.run(['pgrep', '-f', self.keyboard_name], 
+                                  capture_output=True)
+            return result.returncode == 0
+        except:
+            return False
+
+# Global keyboard manager instance
+keyboard_manager = VirtualKeyboardManager()
 
 # Configure Kivy for touch interface
 Window.softinput_mode = 'below_target'
@@ -115,6 +218,58 @@ class CustomLabel(Label):
         font_size = max(10, min(36, height // 2))
         self.font_size = f'{font_size}sp'
 
+class CustomCheckBox(CheckBox):
+    """Custom checkbox with blacker outline and touchscreen-friendly sizing"""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Set minimum size for touchscreen use
+        self.size_hint = (None, None)
+        self.size = (dp(80), dp(80))  # Large size for touchscreen
+        self.bind(size=self._on_size)
+    
+    def _on_size(self, instance, value):
+        """Update checkbox appearance when size changes"""
+        # The checkbox will automatically scale with its size
+        pass
+    
+    def on_size(self, instance, value):
+        """Called when the checkbox size changes"""
+        # Ensure minimum touch-friendly size
+        min_size = dp(60)
+        if self.width < min_size or self.height < min_size:
+            self.size = (max(self.width, min_size), max(self.height, min_size))
+
+class CustomTextInput(TextInput):
+    """Custom TextInput that manages virtual keyboard visibility"""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.bind(focus=self._on_focus_change)
+        self.bind(text=self._on_text_change)
+    
+    def _on_focus_change(self, instance, value):
+        """Handle focus changes to show/hide keyboard"""
+        if value:  # TextInput gained focus
+            # Show virtual keyboard
+            keyboard_manager.show_keyboard()
+            print("TextInput focused - showing keyboard")
+        else:  # TextInput lost focus
+            # Hide virtual keyboard after a short delay
+            Clock.schedule_once(self._hide_keyboard_delayed, 0.5)
+            print("TextInput unfocused - hiding keyboard")
+    
+    def _hide_keyboard_delayed(self, dt):
+        """Hide keyboard with delay to allow for touch events"""
+        # Only hide if no other TextInput is focused
+        if not self.focus:
+            keyboard_manager.hide_keyboard()
+    
+    def _on_text_change(self, instance, value):
+        """Handle text changes"""
+        # You can add custom text validation here if needed
+        pass
+
 # KV Language string for custom styling
 KV = '''
 #:import utils kivy.utils
@@ -145,6 +300,54 @@ KV = '''
     font_size: '24sp'  # Responsive font size
     size_hint_y: None
     height: dp(40)
+
+<CustomCheckBox>:
+    size_hint: None, None
+    size: dp(80), dp(80)  # Large size for touchscreen
+    color: 0.13, 0.59, 0.95, 1  # Blue when checked
+    canvas.before:
+        # Blacker outline for better visibility
+        Color:
+            rgba: 0.1, 0.1, 0.1, 1  # Very dark gray/black outline
+        Ellipse:
+            pos: self.pos
+            size: self.size
+        # Background
+        Color:
+            rgba: 1, 1, 1, 1  # White background
+        Ellipse:
+            pos: self.x + dp(2), self.y + dp(2)
+            size: self.width - dp(4), self.height - dp(4)
+    canvas.after:
+        # Check mark when active
+        Color:
+            rgba: 0.13, 0.59, 0.95, 1 if self.active else 0, 0, 0, 0
+        Ellipse:
+            pos: self.x + self.width * 0.2, self.y + self.height * 0.2
+            size: self.width * 0.6, self.height * 0.6
+
+<CustomTextInput>:
+    background_color: 1, 1, 1, 1  # White background
+    foreground_color: 0.13, 0.13, 0.13, 1  # Dark text
+    cursor_color: 0.13, 0.59, 0.95, 1  # Blue cursor
+    font_size: dp(20)
+    size_hint_y: None
+    height: dp(50)
+    padding: dp(10)
+    multiline: False
+    canvas.before:
+        Color:
+            rgba: 0.8, 0.8, 0.8, 1  # Light gray border
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(5)]
+        Color:
+            rgba: self.background_color
+        RoundedRectangle:
+            pos: self.x + dp(2), self.y + dp(2)
+            size: self.width - dp(4), self.height - dp(4)
+            radius: [dp(3)]
 
 <WeightWellButton>:
     background_color: 0.96, 0.26, 0.21, 1  # Default error color (actual_weight = 0)
@@ -432,22 +635,6 @@ KV = '''
                 size_hint_y: None
                 height: self.minimum_height
                 padding: dp(20)
-                
-                CustomLabel:
-                    text: 'Check Item'
-                    bold: True
-                    color: 0.13, 0.13, 0.13, 1  # Text primary color
-                    font_size: dp(24)
-                    size_hint_y: None
-                    height: dp(60)
-                
-                CustomLabel:
-                    text: 'Status'
-                    bold: True
-                    color: 0.13, 0.13, 0.13, 1  # Text primary color
-                    font_size: dp(24)
-                    size_hint_y: None
-                    height: dp(60)
         
         BoxLayout:
             size_hint_y: None
@@ -1157,6 +1344,11 @@ class MainScreen(Screen):
         dialog = ErrorDialog(error_message=message)
         dialog.open()
     
+    def show_text_input_dialog(self):
+        """Show text input dialog for testing virtual keyboard"""
+        text_dialog = TextInputDialog()
+        text_dialog.open()
+    
     def show_progress_dialog(self):
         """Show progress dialog"""
         self.progress_dialog = ProgressDialog(
@@ -1389,6 +1581,10 @@ class ChecklistDialog(Popup):
     """Pre-job checklist dialog"""
     
     def __init__(self, **kwargs):
+        # Initialize checkboxes list before calling super().__init__()
+        self.checkboxes = []
+        self.job_confirmed = False
+        
         super().__init__(**kwargs)
         self.size_hint = (0.8, 0.8)
         self.title = "Pre-Job Checklist"
@@ -1396,7 +1592,6 @@ class ChecklistDialog(Popup):
         self.background_color = THEME['background']  # Theme background color
         self.title_color = THEME['text_primary']  # Theme text color
         self.title_size = dp(18)
-        self.job_confirmed = False
         
         self._create_checklist()
     
@@ -1405,9 +1600,31 @@ class ChecklistDialog(Popup):
         grid = self.ids.checklist_items
         grid.clear_widgets()
         
+        # Calculate dynamic sizes based on dialog size
+        dialog_height = self.height if self.height > 0 else 600
+        item_height = max(dp(80), dialog_height * 0.08)  # 8% of dialog height, minimum 80dp
+        font_size = max(dp(16), dialog_height * 0.02)  # 2% of dialog height, minimum 16dp
+        
         # Add header
-        grid.add_widget(Label(text="Check Item", bold=True, size_hint_y=None, height=dp(60), color=THEME['text_primary'], font_size=dp(24)))
-        grid.add_widget(Label(text="Status", bold=True, size_hint_y=None, height=dp(60), color=THEME['text_primary'], font_size=dp(24)))
+        header_label = CustomLabel(
+            text="Check Item", 
+            bold=True, 
+            size_hint_y=None, 
+            height=item_height, 
+            color=THEME['text_primary'], 
+            font_size=font_size
+        )
+        grid.add_widget(header_label)
+        
+        status_label = CustomLabel(
+            text="Status", 
+            bold=True, 
+            size_hint_y=None, 
+            height=item_height, 
+            color=THEME['text_primary'], 
+            font_size=font_size
+        )
+        grid.add_widget(status_label)
         
         # Checklist items
         checklist_items = [
@@ -1421,16 +1638,28 @@ class ChecklistDialog(Popup):
             "Work area is clear of obstructions"
         ]
         
-        self.checkboxes = []
+        # Clear existing checkboxes and create new ones
+        self.checkboxes.clear()
         for item in checklist_items:
-            grid.add_widget(Label(text=item, size_hint_y=None, height=dp(60), color=THEME['text_primary'], font_size=dp(20)))
+            # Create label with dynamic sizing
+            item_label = CustomLabel(
+                text=item, 
+                size_hint_y=None, 
+                height=item_height, 
+                color=THEME['text_primary'], 
+                font_size=font_size
+            )
+            grid.add_widget(item_label)
             
-            checkbox = CheckBox(size_hint_y=None, height=dp(60))
+            # Create custom checkbox with dynamic sizing
+            checkbox = CustomCheckBox(size_hint_y=None, height=item_height)
             self.checkboxes.append(checkbox)
             grid.add_widget(checkbox)
     
     def all_checked(self) -> bool:
         """Check if all items are checked"""
+        # if not hasattr(self, 'checkboxes') or not self.checkboxes:
+        #     return False
         return all(checkbox.active for checkbox in self.checkboxes)
     
     def start_job(self):
@@ -1441,6 +1670,27 @@ class ChecklistDialog(Popup):
         else:
             # Show error or highlight unchecked items
             pass
+    
+    def on_open(self):
+        """Called when the dialog opens"""
+        super().on_open()
+        # Schedule dynamic sizing after the dialog is fully opened
+        Clock.schedule_once(self._adjust_sizing, 0.2)
+    
+    def _adjust_sizing(self, dt):
+        """Adjust sizing for different screen sizes"""
+        try:
+            # Recreate checklist with updated sizing
+            self._create_checklist()
+        except Exception as e:
+            print(f"Error adjusting checklist sizing: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def on_size(self, instance, value):
+        """Called when the dialog size changes"""
+        # Schedule sizing adjustment when size changes
+        Clock.schedule_once(self._adjust_sizing, 0.1)
 
 class ProgressDialog(Popup):
     """Job progress dialog"""
@@ -1759,6 +2009,76 @@ class ErrorDialog(Popup):
         self.title_color = THEME['text_primary']  # Theme text color
         self.title_size = dp(18)
 
+class TextInputDialog(Popup):
+    """Example dialog with text input that shows virtual keyboard"""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size_hint = (0.8, 0.6)
+        self.title = "Enter Text"
+        self.background = ''  # Remove default background
+        self.background_color = THEME['background']  # Theme background color
+        self.title_color = THEME['text_primary']  # Theme text color
+        self.title_size = dp(18)
+        
+        # Create the dialog content
+        self._create_content()
+    
+    def _create_content(self):
+        """Create the dialog content"""
+        layout = BoxLayout(orientation='vertical', padding=dp(40), spacing=dp(20))
+        
+        # Instructions
+        layout.add_widget(Label(
+            text='Enter some text below.\nThe virtual keyboard will appear automatically.',
+            size_hint_y=None,
+            height=dp(80),
+            halign='center',
+            valign='top',
+            font_size=dp(24),
+            color=THEME['text_primary']  # Theme text color
+        ))
+        
+        # Text input
+        self.text_input = CustomTextInput(
+            text='',
+            hint_text='Type here...',
+            size_hint_y=None,
+            height=dp(60)
+        )
+        layout.add_widget(self.text_input)
+        
+        # Buttons
+        button_layout = BoxLayout(size_hint_y=None, height=dp(100), spacing=dp(20))
+        
+        cancel_btn = Button(
+            text='Cancel',
+            background_color=THEME['primary'],  # Theme primary color
+            color=THEME['text_white'],  # Theme white text
+            on_press=self.dismiss,
+            font_size=dp(24)
+        )
+        button_layout.add_widget(cancel_btn)
+        
+        ok_btn = Button(
+            text='OK',
+            background_color=THEME['secondary'],  # Theme secondary color
+            color=THEME['text_white'],  # Theme white text
+            on_press=self._on_ok,
+            font_size=dp(24)
+        )
+        button_layout.add_widget(ok_btn)
+        
+        layout.add_widget(button_layout)
+        
+        # Set the content
+        self.content = layout
+    
+    def _on_ok(self, instance):
+        """Handle OK button press"""
+        print(f"Entered text: {self.text_input.text}")
+        self.dismiss()
+
 class JubileeGUIApp(App):
     """Main Jubilee GUI application"""
     
@@ -1779,6 +2099,10 @@ class JubileeGUIApp(App):
         
         # Bind keyboard events
         Window.bind(on_keyboard=self.on_keyboard)
+        
+        # Hide keyboard on startup
+        keyboard_manager.hide_keyboard()
+        print("Jubilee GUI started - keyboard hidden")
     
     def on_keyboard(self, window, key, scancode, codepoint, modifier):
         """Handle keyboard events"""
@@ -1789,18 +2113,35 @@ class JubileeGUIApp(App):
             else:
                 Window.fullscreen = 'auto'
             return True
-        # Escape to exit fullscreen
+        # Escape to exit fullscreen and hide keyboard
         elif key == 27:  # Escape key
             Window.fullscreen = False
+            keyboard_manager.hide_keyboard()
             return True
         return False
     
     def on_stop(self):
         """Clean up when app stops"""
+        # Ensure keyboard is hidden when app closes
+        keyboard_manager.hide_keyboard()
+        
         # Disconnect from Jubilee system
         main_screen = self.root.get_screen('main')
         if hasattr(main_screen, 'jubilee_manager'):
             main_screen.jubilee_manager.disconnect()
+        
+        print("Jubilee GUI stopped - keyboard hidden")
+    
+    def on_pause(self):
+        """Called when the application is paused (e.g., minimized)"""
+        # Hide keyboard when app is paused
+        keyboard_manager.hide_keyboard()
+        return True
+    
+    def on_resume(self):
+        """Called when the application resumes"""
+        # Keyboard will be shown automatically when TextInput gains focus
+        pass
 
 if __name__ == '__main__':
     JubileeGUIApp().run() 
