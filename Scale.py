@@ -86,7 +86,7 @@ class Scale:
     Provides methods to send commands and parse responses according to the scale's protocol.
     """
 
-    def __init__(self, port: str, baudrate: int = 9600, timeout: int = 1):
+    def __init__(self, port: str, baudrate: int = 2400, timeout: int = 1):
         """
         Initialize the Scale object and connection parameters.
         :param port: Serial port (e.g., 'COM1' or '/dev/ttyUSB0')
