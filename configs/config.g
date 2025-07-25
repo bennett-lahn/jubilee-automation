@@ -36,10 +36,12 @@ M584 X1.0 Y1.1            ; X and Y for CoreXY
 M584 U1                   ; U for toolchanger lock
 M584 Z2:3:4               ; Z has three drivers for kinematic bed suspension. 
 M584 E0.0           	  ; extruder
+M584 T0                   ; Tamper axis
 
 
 M569 P1.0 S0 D2             ; 3HC Drive 0 | X stepper | Port 0
 M569 P1.1 S0 D2             ; 3HC Drive 1 | Y Stepper | Port 1
+
 ;M906 X{0.85*sqrt(2)*2000} ; LDO XY 2000mA RMS the TMC5160 driver on duet3
 ;M906 Y{0.85*sqrt(2)*2000} ; generates a sinusoidal coil current so we can
 M906 X{0.85*sqrt(2)*2500} ; LDO XY 2000mA RMS the TMC5160 driver on duet3
@@ -52,10 +54,12 @@ M569 P0.1 S0                ; Drive 1 | U Tool Changer Lock  670mA
 M906 U670 I60             ; 100% of 670mA RMS. idle 60%
                           ; Note that the idle will be shared for all drivers
 
+M569 P0.0 S0 D2             ; Drive 0 | Tamper axis
 M569 P0.2 S0                ; Drive 2 | Front Left Z
 M569 P0.3 S0                ; Drive 3 | Front Right Z
 M569 P0.4 S0                ; Drive 4 | Back Z
 M906 Z{0.7*sqrt(2)*1680}  ; 70% of 1680mA RMS
+M906 T{0.5*sqrt(2)*1680}
 
 M906 E{0.8*1300}
 
@@ -75,18 +79,19 @@ M671 X297.5:2.5:150 Y313.5:313.5:-16.5 S10 ; Front Left: (297.5, 313.5)
 ; Axis and motor configuration 
 ;-------------------------------------------------------------------------------
 
-M350 X1 Y1 Z1 U1       ; Disable microstepping to simplify calculations
+M350 X1 Y1 Z1 U1 T1     ; Disable microstepping to simplify calculations
 ;M92 X{1/(0.9*16/180)}  ; step angle * tooth count / 180
 ;M92 Y{1/(0.9*16/180)}  ; The 2mm tooth spacing cancel out with diam to radius
 M92 X{1/(1.8*16/180)}  ; step angle * tooth count / 180
 M92 Y{1/(1.8*16/180)}  ; The 2mm tooth spacing cancel out with diam to radius
 M92 Z{360/1.8/2}       ; 1.8 deg stepper / lead (2mm) of screw for Roumeli Lab
 M92 U{13.76/1.8}       ; gear ratio / step angle for tool lock geared motor.
+M92 T{1/(1.8*16/180)}  ; step angle * tooth count / 180
 ;M92 E51.875            ; Extruder - BMG 0.9 deg/step
 M92 E8000			;gel extruder
 
 ; Enable microstepping all step per unit will be multiplied by the new step def
-M350 X16 Y16 I1        ; 16x microstepping for CoreXY axes. Use interpolation.
+M350 X16 Y16 T1 I1        ; 16x microstepping for CoreXY axes, tamper. Use interpolation.
 M350 U4 I1             ; 4x for toolchanger lock. Use interpolation.
 M350 Z16 I1            ; 16x microstepping for Z axes. Use interpolation.
 M350 E16:16:16:16:16 I1         ; 16x microstepping for Extruder axes. Use interpolation.
@@ -98,11 +103,12 @@ M350 E16:16:16:16:16 I1         ; 16x microstepping for Extruder axes. Use inter
 M201 X1500 Y1500                        ; Accelerations (mm/s^2)
 M201 Z100                               ; LDO ZZZ Acceleration
 M201 U800                               ; LDO U Accelerations (mm/s^2)
-M201 E1000                             ; Extruder
+M201 E1000                              ; Extruder
+M201 T800                               ; Tamper
 
 M203 X18000 Y18000 Z800 U9000           ; Maximum axis speeds (mm/min)
-M203 E500
-M566 X500 Y500 Z500 E3000 U50           ; Maximum jerk speeds (mm/min)
+M203 E500 T400
+M566 X500 Y500 Z500 E3000 U50 T500      ; Maximum jerk speeds (mm/min)
 
 
 
@@ -113,6 +119,7 @@ M566 X500 Y500 Z500 E3000 U50           ; Maximum jerk speeds (mm/min)
 M574 X1 S1 P"^1.io0.in"  ; 3HC homing position X1 = axis min, type S1 = switch
 M574 Y1 S1 P"^1.io1.in"  ; 3HC homing position Y1 = axis min, type S1 = switch
 M574 U1 S1 P"^io1.in"    ; homing position U1 = axis min, type S1 = switch
+M574 T1 S3               ; Tamper
 
 
 M574 Z0                 ; we will use the switch as a Z probe not endstop 
@@ -126,6 +133,11 @@ G31 K0 X0 Y0 Z-2        ; Set the limit switch as the "Control Point"
 ; in the 305mmx305mm build plate.
 M208 X-13.75:313.75 Y-44:341 Z0:295 V0:480
 M208 U0:200            ; Set Elastic Lock (U axis) max rotation angle
+M208 T0:100C           ; Tamper min and max
+
+; Tamper stall detection
+; Z = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event
+M915 T S3 F1 H200 R2
 
 
 ; Heaters and temperature sensors
@@ -164,3 +176,28 @@ M98 P"/sys/syringe-extruder.g" ; syringe extruder is tool 0
                                       ; T = temps for thermo mode.
 ;M950 F5 C"0.out7"
 ;M106 P5 C"PrintCool0"
+
+; ============================================================================
+; TOOL CONFIGURATION
+; ============================================================================
+
+; Define tamper tool
+; T2 = tool number 2, P2 = driver number 2
+; M563 P2 D2 H2 F2
+
+; Set tool name
+; M563 P2 S"Tamper"
+
+; ============================================================================
+; MACRO CONFIGURATION
+; ============================================================================
+
+; Enable rehome.g macro for sensorless homing
+; This macro will be called when G28 Z is executed
+
+; ============================================================================
+; EVENT HANDLING
+; ============================================================================
+
+; Ensure driver-stall.g is in the system folder for handling stall events
+; The driver-stall.g macro will be called automatically when stall events occur
