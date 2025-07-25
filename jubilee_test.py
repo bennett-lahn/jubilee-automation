@@ -6,6 +6,7 @@ This script homes the Jubilee motion platform and moves it in a circle twice usi
 import math
 import time
 from science_jubilee.Machine import Machine
+from Scale import Scale
 
 def main():
     # Initialize the Machine
@@ -79,4 +80,22 @@ def main():
         machine.disconnect()
 
 if __name__ == "__main__":
-    main()
+    port = input("Enter the serial port for the scale (e.g., COM3 or /dev/ttyUSB0): ")
+    scale = Scale(port)
+    try:
+        scale.connect()
+        print("\nPlace the empty container on the scale and press Enter...")
+        input()
+        print("Taring the scale...")
+        scale.tare()
+        print("Tare complete. Remove your hands and wait for the scale to stabilize.")
+        time.sleep(2)
+        print("\nPlace the object to be weighed in the container and press Enter...")
+        input()
+        print("Measuring weight...")
+        weight = scale.get_weight(stable=True)
+        print(f"Measured weight: {weight:.4f} g")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        scale.disconnect()
