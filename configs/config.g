@@ -54,7 +54,7 @@ M569 P0.1 S0                ; Drive 1 | U Tool Changer Lock  670mA
 M906 U670 I60             ; 100% of 670mA RMS. idle 60%
                           ; Note that the idle will be shared for all drivers
 
-M569 P0.0 S0 D2             ; Drive 0 | Tamper axis
+M569 P0.0 S3 D2 V100        ; Drive 0 | Tamper axis | Turn on stealthChop for sensorless homing, stall detection
 M569 P0.2 S0                ; Drive 2 | Front Left Z
 M569 P0.3 S0                ; Drive 3 | Front Right Z
 M569 P0.4 S0                ; Drive 4 | Back Z
