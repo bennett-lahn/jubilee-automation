@@ -136,8 +136,8 @@ M208 U0:200            ; Set Elastic Lock (U axis) max rotation angle
 M208 T0:100C           ; Tamper min and max
 
 ; Tamper stall detection
-; Z = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event
-M915 T S3 F1 H200 R2
+; P0.0 = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event
+M915 P0.0 S3 F1 H200 R2
 
 
 ; Heaters and temperature sensors
