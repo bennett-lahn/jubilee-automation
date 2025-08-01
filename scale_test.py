@@ -8,13 +8,19 @@ from Scale import Scale
 import serial
 
 def main():
-    ser = serial.Serial('/dev/serial0', 2400, timeout=1)  # Adjust baudrate as needed
-    ser.flush()
+    ser = serial.Serial('/dev/serial1337', 2400, timeout=1)
+    ser.reset_input_buffer()
 
-    while True:
-        if ser.in_waiting > 0:
-            line = ser.readline().decode('utf-8', errors='ignore').rstrip()
-            print(f"Received: {line}")
+    try:
+        while True:
+            if ser.in_waiting > 0:
+                line = ser.readline().decode('ascii', errors='ignore').rstrip()
+                print(f"Received: {line}")
+    except KeyboardInterrupt:
+        print("Interrupted by user.")
+    finally:
+        ser.close()
+
 
     # port = input("Enter the serial port for the scale (e.g., COM3 or /dev/ttyUSB0): ")
     # scale = Scale(port)
