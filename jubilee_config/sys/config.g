@@ -86,7 +86,7 @@ M92 X{1/(1.8*16/180)}  ; step angle * tooth count / 180
 M92 Y{1/(1.8*16/180)}  ; The 2mm tooth spacing cancel out with diam to radius
 M92 Z{360/1.8/2}       ; 1.8 deg stepper / lead (2mm) of screw for Roumeli Lab
 M92 U{13.76/1.8}       ; gear ratio / step angle for tool lock geared motor.
-M92 T{1/(1.8*16/180)}  ; step angle * tooth count / 180
+M92 T{1/(0.9*16/180)}  ; step angle * tooth count / 180 TODO: Update for correct Tamper motor
 ;M92 E51.875            ; Extruder - BMG 0.9 deg/step
 M92 E8000			;gel extruder
 
@@ -136,8 +136,8 @@ M208 U0:200            ; Set Elastic Lock (U axis) max rotation angle
 M208 T0:100C           ; Tamper min and max
 
 ; Tamper stall detection
-; Z = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event
-M915 T S3 F1 H200 R2
+; P0.0 = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event
+M915 P0.0 S3 F1 H200 R2
 
 
 ; Heaters and temperature sensors
