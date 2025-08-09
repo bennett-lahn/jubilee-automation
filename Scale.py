@@ -163,6 +163,7 @@ class Scale:
         self.serial.write((cmd + CRLF).encode('ascii'))
         # Read response
         response = self.serial.readline()
+        print(f"[DEBUG] Response: {response.hex()}")
         if not response:
             raise ScaleException("No response from scale (timeout).")
         # Handle ACK or error
@@ -281,6 +282,7 @@ class Scale:
         :return: The weight in grams
         """
         resp = self.request_stable_weight() if stable else self.request_instant_weight()
+        print(f"[DEBUG] Response: {resp.hex()}")
         return self._parse_weight(resp, expect_stable=stable)
 
     def _parse_weight(self, data: str, expect_stable: bool = True) -> float:
