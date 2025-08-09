@@ -281,6 +281,7 @@ class Scale:
         :return: The weight in grams
         """
         resp = self.request_stable_weight() if stable else self.request_instant_weight()
+        print(f"[DEBUG] Response: {resp.hex()}")
         return self._parse_weight(resp, expect_stable=stable)
 
     def _parse_weight(self, data: str, expect_stable: bool = True) -> float:
