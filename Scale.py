@@ -164,9 +164,10 @@ class Scale:
         # Read response
         if expect_data:
             response = self.serial.readline()
+            if not response:
+                raise ScaleException("No response from scale (timeout).")
             print(f"[DEBUG] Response: {response}")
-        if expect_data and not response:
-            raise ScaleException("No response from scale (timeout).")
+
         # Handle ACK or error
         if response == ACK: # Data requests may not return ACK if data is immediately available
             if expect_data:
