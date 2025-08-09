@@ -41,7 +41,7 @@ def scale_test_mode(port):
         scale.disconnect()
 
 def main():
-    port = input("Enter the serial port for the scale (e.g., COM3 or /dev/ or /dev/serial0): ")
+    port = input("Enter the serial port for the scale (e.g., COM3 or /dev/ttyUSB0 or /dev/serial0): ")
     print("Select mode:")
     print("1. Listener mode (raw serial output)")
     print("2. Scale test mode (tare and weigh)")

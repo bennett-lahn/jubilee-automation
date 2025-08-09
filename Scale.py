@@ -86,15 +86,21 @@ class Scale:
     Provides methods to send commands and parse responses according to the scale's protocol.
     """
 
-    def __init__(self, port: str, baudrate: int = 2400, timeout: int = 1):
+    def __init__(self, port: str, baudrate: int = 9600, timeout: int = 10, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS):
         """
         Initialize the Scale object and connection parameters.
         :param port: Serial port (e.g., 'COM1' or '/dev/ttyUSB0')
         :param baudrate: Baud rate for serial communication
         :param timeout: Read timeout in seconds
+        :param parity: Parity setting (default: PARITY_NONE)
+        :param stopbits: Stop bits setting (default: STOPBITS_ONE)
+        :param bytesize: Byte size setting (default: EIGHTBITS)
         """
         self.port = port
         self.baudrate = baudrate
+        self.parity = parity
+        self.stopbits = stopbits
+        self.bytesize = bytesize
         self.timeout = timeout
         self.serial = None
         self._is_connected = False
@@ -105,8 +111,17 @@ class Scale:
         Raises ScaleException if connection fails.
         """
         try:
-            self.serial = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
+            self.serial = serial.Serial(
+                port=self.port,
+                baudrate=self.baudrate,
+                bytesize=self.bytesize,
+                parity=self.parity,
+                stopbits=self.stopbits,
+                timeout=self.timeout
+            )
             self._is_connected = True
+            print(f"[DEBUG] Serial connection established: {self.serial}")
+            print(f"[DEBUG] Serial port open: {self.serial.is_open}")
         except serial.SerialException as e:
             self._is_connected = False
             raise ScaleException(f"Error connecting to scale: {e}")
