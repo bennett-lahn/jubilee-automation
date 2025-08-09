@@ -168,20 +168,21 @@ class Scale:
                 raise ScaleException("No response from scale (timeout).")
             print(f"[DEBUG] Response: {response}")
 
-        # Handle ACK or error
-        if response == ACK: # Data requests may not return ACK if data is immediately available
-            if expect_data:
-                # Read next line for data
-                data = self.serial.readline()
-                if not data:
-                    raise ScaleException("No data after ACK.")
-                return data.decode('ascii').strip()
-            return 'ACK'
-        decoded = response.decode('ascii').strip()
-        if decoded.startswith('EC,'):
-            err = ScaleError.from_response(decoded)
-            raise ScaleException(f"Scale error: {err} ({decoded})")
-        return decoded
+            # Handle ACK or error
+            if response == ACK: # Data requests may not return ACK if data is immediately available
+                if expect_data:
+                    # Read next line for data
+                    data = self.serial.readline()
+                    if not data:
+                        raise ScaleException("No data after ACK.")
+                    return data.decode('ascii').strip()
+                return 'ACK'
+            decoded = response.decode('ascii').strip()
+            if decoded.startswith('EC,'):
+                err = ScaleError.from_response(decoded)
+                raise ScaleException(f"Scale error: {err} ({decoded})")
+            return decoded
+        return None
 
     # --- Command Methods ---
     def cancel(self):
@@ -234,7 +235,7 @@ class Scale:
 
     def print_weight(self):
         """Print the current weight (PRT command)."""
-        return self._send_command('PRT')
+        return self._send_command('PRT', expect_data=True)
 
     def re_zero(self):
         """Re-zero the scale (R command)."""
