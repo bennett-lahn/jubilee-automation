@@ -27,9 +27,11 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.checkbox import CheckBox
 from kivy.uix.progressbar import ProgressBar
 from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.uix.widget import Widget
 from kivy.core.window import Window
 from kivy.clock import Clock
 from kivy.metrics import dp
+from kivy.graphics import Color, Rectangle
 from kivy.properties import ObjectProperty, StringProperty, NumericProperty, BooleanProperty
 from kivy.lang import Builder
 import threading
@@ -613,48 +615,6 @@ KV = '''
         Rectangle:
             pos: self.pos
             size: self.size
-    BoxLayout:
-        orientation: 'vertical'
-        padding: dp(40)
-        spacing: dp(20)
-        
-        CustomLabel:
-            text: 'Pre-Job Checklist'
-            font_size: dp(48)
-            bold: True
-            halign: 'center'
-            color: 0.13, 0.13, 0.13, 1  # Text primary color
-            size_hint_y: None
-            height: dp(80)
-        
-        ScrollView:
-            GridLayout:
-                id: checklist_items
-                cols: 2
-                spacing: dp(20)
-                size_hint_y: None
-                height: self.minimum_height
-                padding: dp(20)
-        
-        BoxLayout:
-            size_hint_y: None
-            height: dp(100)
-            spacing: dp(20)
-            
-            CustomButton:
-                text: 'Cancel'
-                on_press: root.dismiss()
-                background_color: 0.96, 0.26, 0.21, 1  # Error color
-                color: 1, 1, 1, 1  # White text
-                font_size: dp(24)
-            
-            CustomButton:
-                text: 'Start Job'
-                on_press: root.start_job()
-                disabled: not root.all_checked()
-                background_color: 0.30, 0.69, 0.31, 1  # Secondary color
-                color: 1, 1, 1, 1  # White text
-                font_size: dp(24)
 
 <ProgressDialog>:
     canvas.before:
@@ -778,37 +738,7 @@ KV = '''
             font_size: dp(36)
             bold: True
 
-<FinishedDialog>:
-    canvas.before:
-        Color:
-            rgba: 1, 1, 1, 1  # White background
-        Rectangle:
-            pos: self.pos
-            size: self.size
-    BoxLayout:
-        orientation: 'vertical'
-        padding: dp(20)
-        spacing: dp(10)
-        
-        CustomLabel:
-            text: 'Job Completed!'
-            font_size: dp(72)
-            bold: True
-            halign: 'center'
-            color: 0.30, 0.69, 0.31, 1  # Green
-        
-        CustomLabel:
-            text: 'All wells have been filled successfully.'
-            font_size: dp(32)
-            halign: 'center'
-            color: 0.13, 0.13, 0.13, 1  # Text primary color
-        
-        CustomButton:
-            text: 'OK'
-            font_size: dp(72)
-            on_press: root.dismiss()
-            background_color: 0.30, 0.69, 0.31, 1  # Secondary color
-            color: 1, 1, 1, 1  # White text
+
 
 <ErrorDialog>:
     canvas.before:
@@ -1239,7 +1169,9 @@ class MainScreen(Screen):
         try:
             for i, job_well in enumerate(self.job_wells):
                 if not self.job_running:
-                    break
+                    # Job was cancelled or aborted
+                    Clock.schedule_once(lambda dt: self._job_cancelled(i), 0)
+                    return
                 
                 # Update progress
                 self.update_job_progress(i, len(self.job_wells), job_well.well_id)
@@ -1262,7 +1194,7 @@ class MainScreen(Screen):
                 # Update progress after completion
                 self.update_job_progress(i + 1, len(self.job_wells), f"Completed {job_well.well_id}")
             
-            # Job completed
+            # Job completed successfully
             Clock.schedule_once(lambda dt: self._job_completed(), 0)
             
         except Exception as e:
@@ -1275,7 +1207,9 @@ class MainScreen(Screen):
         try:
             for i, job_well in enumerate(self.job_wells):
                 if not self.job_running:
-                    break
+                    # Job was cancelled or aborted
+                    Clock.schedule_once(lambda dt: self._job_cancelled(i), 0)
+                    return
                 
                 # Update progress
                 self.update_job_progress(i, len(self.job_wells), f"Simulating {job_well.well_id}")
@@ -1293,7 +1227,7 @@ class MainScreen(Screen):
                 # Update progress after completion
                 self.update_job_progress(i + 1, len(self.job_wells), f"Completed {job_well.well_id}")
             
-            # Job completed
+            # Job completed successfully
             Clock.schedule_once(lambda dt: self._job_completed(), 0)
             
         except Exception as e:
@@ -1325,19 +1259,58 @@ class MainScreen(Screen):
         
         self.show_finished_dialog()
     
-    def _update_actual_weights_from_job(self):
+    def _job_cancelled(self, completed_count: int):
+        """Handle job cancellation"""
+        self.job_running = False
+        self.status_text = "Job cancelled"
+        
+        # Update actual weights only for wells that were actually completed
+        self._update_actual_weights_from_job(completed_count)
+        
+        self.show_cancelled_dialog(completed_count)
+    
+    def _job_aborted(self, completed_count: int):
+        """Handle job abort"""
+        self.job_running = False
+        self.status_text = "Job aborted"
+        
+        # Update actual weights only for wells that were actually completed
+        self._update_actual_weights_from_job(completed_count)
+        
+        # Dismiss progress dialog and show aborted dialog
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.dismiss()
+        
+        self.show_aborted_dialog(completed_count)
+    
+    def _update_actual_weights_from_job(self, completed_count: int = None):
         """Update actual weights based on completed job wells"""
-        for job_well in self.job_wells:
-            if job_well.completed:
-                # In real mode, this would be the actual measured weight
-                # For now, use target weight as actual weight (simulation)
-                self.actual_weights[job_well.well_id] = job_well.target_weight
-                self.update_well_button_text(job_well.well_id)
+        if completed_count is None:
+            # Use all completed wells (for successful completion)
+            for job_well in self.job_wells:
+                if job_well.completed:
+                    # In real mode, this would be the actual measured weight
+                    # For now, use target weight as actual weight (simulation)
+                    self.actual_weights[job_well.well_id] = job_well.target_weight
+                    self.update_well_button_text(job_well.well_id)
+        else:
+            # Use only the first N completed wells (for cancellation/abort)
+            for i, job_well in enumerate(self.job_wells):
+                if i < completed_count and job_well.completed:
+                    # In real mode, this would be the actual measured weight
+                    # For now, use target weight as actual weight (simulation)
+                    self.actual_weights[job_well.well_id] = job_well.target_weight
+                    self.update_well_button_text(job_well.well_id)
     
     def stop_job(self):
         """Stop the current job"""
         self.job_running = False
         self.status_text = "Job stopped"
+    
+    def stop_job_abort(self):
+        """Stop the current job with abort flag"""
+        self.job_running = False
+        self.status_text = "Job aborted"
     
     def show_error(self, message: str):
         """Show error dialog"""
@@ -1358,10 +1331,13 @@ class MainScreen(Screen):
         )
         self.progress_dialog.bind(on_dismiss=self._on_progress_dismiss)
         self.progress_dialog.open()
+        
+        # Flag to track if dialog is being dismissed due to abort/cancel
+        self.progress_dialog_being_dismissed = False
 
-        # Add a clock to auto-close the progress dialog when jobo ends
+        # Add a clock to auto-close the progress dialog when job ends
         def auto_close_progress_dialog(dt):
-            if not self.job_running and self.progress_dialog:
+            if not self.job_running and self.progress_dialog and not self.progress_dialog_being_dismissed:
                 self.progress_dialog.dismiss()
             else:
                 # Reschedule if still running
@@ -1371,11 +1347,23 @@ class MainScreen(Screen):
     def _on_progress_dismiss(self, instance):
         """Handle progress dialog dismissal"""
         self.progress_dialog = None
-        self.stop_job()
+        # Only call stop_job if not being dismissed due to abort/cancel
+        if not hasattr(self, 'progress_dialog_being_dismissed') or not self.progress_dialog_being_dismissed:
+            self.stop_job()
     
     def show_finished_dialog(self):
         """Show job finished dialog"""
         dialog = FinishedDialog()
+        dialog.open()
+    
+    def show_cancelled_dialog(self, completed_count: int):
+        """Show job cancelled dialog"""
+        dialog = CancelledDialog(completed_count=completed_count, total_count=len(self.job_wells))
+        dialog.open()
+    
+    def show_aborted_dialog(self, completed_count: int):
+        """Show job aborted dialog"""
+        dialog = AbortedDialog(completed_count=completed_count, total_count=len(self.job_wells))
         dialog.open()
     
     def shutdown_system(self):
@@ -1578,112 +1566,108 @@ class WeightDialog(Popup):
             pass
 
 class ChecklistDialog(Popup):
-    """Pre-job checklist dialog"""
+    """Pre-job confirmation dialog"""
     
     def __init__(self, **kwargs):
-        # Initialize checkboxes list before calling super().__init__()
-        self.checkboxes = []
         self.job_confirmed = False
         
         super().__init__(**kwargs)
         self.size_hint = (0.8, 0.8)
-        self.title = "Pre-Job Checklist"
+        self.title = "Pre-Job Confirmation"
         self.background = ''  # Remove default background
         self.background_color = THEME['background']  # Theme background color
         self.title_color = THEME['text_primary']  # Theme text color
         self.title_size = dp(18)
         
-        self._create_checklist()
+        self._create_content()
     
-    def _create_checklist(self):
-        """Create checklist items"""
-        grid = self.ids.checklist_items
-        grid.clear_widgets()
+    def _create_content(self):
+        """Create confirmation content"""
+        layout = BoxLayout(orientation='vertical', padding=dp(40), spacing=dp(20))
         
-        # Calculate dynamic sizes based on dialog size
-        dialog_height = self.height if self.height > 0 else 600
-        item_height = max(dp(80), dialog_height * 0.08)  # 8% of dialog height, minimum 80dp
-        font_size = max(dp(16), dialog_height * 0.02)  # 2% of dialog height, minimum 16dp
-        
-        # Add header
+        # Header
         header_label = CustomLabel(
-            text="Check Item", 
-            bold=True, 
-            size_hint_y=None, 
-            height=item_height, 
-            color=THEME['text_primary'], 
-            font_size=font_size
+            text="Please confirm the following requirements are fulfilled:",
+            bold=True,
+            size_hint_y=None,
+            height=dp(80),
+            color=THEME['text_primary'],
+            font_size=dp(32),
+            halign='center'
         )
-        grid.add_widget(header_label)
+        layout.add_widget(header_label)
         
-        status_label = CustomLabel(
-            text="Status", 
-            bold=True, 
-            size_hint_y=None, 
-            height=item_height, 
-            color=THEME['text_primary'], 
-            font_size=font_size
-        )
-        grid.add_widget(status_label)
-        
-        # Checklist items
-        checklist_items = [
-            "Correct molds are in place",
-            "Powder reservoir is attached",
-            "All components are properly fitted",
-            "No debris in the machine",
-            "Scale is connected and stable",
-            "Trickler tool is loaded and calibrated",
-            "Emergency stop is accessible",
-            "Work area is clear of obstructions"
+        # Requirements list
+        requirements = [
+            "• Powder reservoir is attached with correct material",
+            "• Scale is connected and stable",
+            "• Work area is clean with no obstructions in the machine"
         ]
         
-        # Clear existing checkboxes and create new ones
-        self.checkboxes.clear()
-        for item in checklist_items:
-            # Create label with dynamic sizing
-            item_label = CustomLabel(
-                text=item, 
-                size_hint_y=None, 
-                height=item_height, 
-                color=THEME['text_primary'], 
-                font_size=font_size
+        for requirement in requirements:
+            req_label = CustomLabel(
+                text=requirement,
+                size_hint_y=None,
+                height=dp(60),
+                color=THEME['text_primary'],
+                font_size=dp(28),
+                halign='left',
+                text_size=(self.width - dp(80), None)
             )
-            grid.add_widget(item_label)
-            
-            # Create custom checkbox with dynamic sizing
-            checkbox = CustomCheckBox(size_hint_y=None, height=item_height)
-            self.checkboxes.append(checkbox)
-            grid.add_widget(checkbox)
+            layout.add_widget(req_label)
+        
+        # Add some spacing
+        layout.add_widget(Widget(size_hint_y=1))
+        
+        # Buttons
+        button_layout = BoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=dp(100),
+            spacing=dp(20)
+        )
+        
+        cancel_btn = CustomButton(
+            text='Cancel',
+            on_press=self.dismiss,
+            background_color=THEME['error'],
+            color=THEME['text_white'],
+            font_size=dp(24)
+        )
+        button_layout.add_widget(cancel_btn)
+        
+        confirm_btn = CustomButton(
+            text='Confirm & Start Job',
+            on_press=self.confirm_job,
+            background_color=THEME['secondary'],
+            color=THEME['text_white'],
+            font_size=dp(24)
+        )
+        button_layout.add_widget(confirm_btn)
+        
+        layout.add_widget(button_layout)
+        
+        # Set the content
+        self.content = layout
     
-    def all_checked(self) -> bool:
-        """Check if all items are checked"""
-        # if not hasattr(self, 'checkboxes') or not self.checkboxes:
-        #     return False
-        return all(checkbox.active for checkbox in self.checkboxes)
-    
-    def start_job(self):
-        """Start the job if all items are checked"""
-        if self.all_checked():
-            self.job_confirmed = True
-            self.dismiss()
-        else:
-            # Show error or highlight unchecked items
-            pass
+    def confirm_job(self, instance):
+        """Confirm the job requirements and start"""
+        self.job_confirmed = True
+        self.dismiss()
     
     def on_open(self):
         """Called when the dialog opens"""
         super().on_open()
-        # Schedule dynamic sizing after the dialog is fully opened
+        # Schedule content recreation after the dialog is fully opened
         Clock.schedule_once(self._adjust_sizing, 0.2)
     
     def _adjust_sizing(self, dt):
         """Adjust sizing for different screen sizes"""
         try:
-            # Recreate checklist with updated sizing
-            self._create_checklist()
+            # Recreate content with updated sizing
+            self._create_content()
         except Exception as e:
-            print(f"Error adjusting checklist sizing: {e}")
+            print(f"Error adjusting confirmation dialog sizing: {e}")
             import traceback
             traceback.print_exc()
     
@@ -1851,7 +1835,13 @@ class ProgressDialog(Popup):
     def _confirm_cancel(self, popup):
         """Confirm job cancellation"""
         popup.dismiss()
-        self._cancel_job_hardware()
+        # Get main screen and call cancel method with completed count
+        try:
+            main_screen = App.get_running_app().root.get_screen('main')
+            completed_count = self.completed_wells
+            main_screen._job_cancelled(completed_count)
+        except:
+            pass
         self.dismiss()
     
     def abort_job(self):
@@ -1869,6 +1859,18 @@ class ProgressDialog(Popup):
             if self.abort_timer:
                 self.abort_timer.cancel()
             self._abort_job_hardware()
+            # Get main screen and call abort method
+            try:
+                main_screen = App.get_running_app().root.get_screen('main')
+                # Get the current completed count from the progress dialog
+                completed_count = self.completed_wells
+                # Set flag to prevent auto-close
+                main_screen.progress_dialog_being_dismissed = True
+                main_screen._job_aborted(completed_count)
+            except:
+                import traceback
+                print("Error calling _job_aborted")
+                traceback.print_exc()
             self.dismiss()
     
     def _reset_abort_state(self, dt):
@@ -1880,35 +1882,34 @@ class ProgressDialog(Popup):
         self.abort_button_color = THEME['error']  # Theme error color
     
     def _cancel_job_hardware(self):
-        """Cancel job with hardware control (placeholder)"""
-        # TODO: Implement hardware cancellation
-        # - Stop current dispensing operation
-        # - Return to safe position
-        # - Clean up any ongoing operations
-        print("Hardware cancel job - placeholder")
-        
-        # Get main screen and stop job
+        """Cancel job with hardware control"""
+        # Send M25 command to pause/resume the current job
         try:
             main_screen = App.get_running_app().root.get_screen('main')
-            main_screen.stop_job()
+            if main_screen.jubilee_manager.connected and main_screen.jubilee_manager.machine:
+                main_screen.jubilee_manager.machine.gcode("M25")  # Pause/resume command
+                print("Sent M25 command to pause job")
+        except Exception as e:
+            print(f"Error sending M25 command: {e}")
+        
+        # Get main screen and call cancel method with completed count
+        try:
+            main_screen = App.get_running_app().root.get_screen('main')
+            completed_count = self.completed_wells
+            main_screen._job_cancelled(completed_count)
         except:
             pass
     
     def _abort_job_hardware(self):
-        """Abort job with emergency hardware control (placeholder)"""
-        # TODO: Implement emergency hardware abort
-        # - Emergency stop all motors
-        # - Stop all dispensing operations immediately
-        # - Return to home position safely
-        # - Disable all tool operations
-        print("Hardware abort job - placeholder")
-        
-        # Get main screen and stop job
+        """Abort job with emergency hardware control"""
+        # Send M112 command for emergency stop
         try:
             main_screen = App.get_running_app().root.get_screen('main')
-            main_screen.stop_job()
-        except:
-            pass
+            if main_screen.jubilee_manager.connected and main_screen.jubilee_manager.machine:
+                main_screen.jubilee_manager.machine.gcode("M112")  # Emergency stop command
+                print("Sent M112 emergency stop command")
+        except Exception as e:
+            print(f"Error sending M112 command: {e}")
 
 class FinishedDialog(Popup):
     """Job finished dialog"""
@@ -1921,6 +1922,228 @@ class FinishedDialog(Popup):
         self.background_color = THEME['background']  # Theme background color
         self.title_color = THEME['text_primary']  # Theme text color
         self.title_size = dp(18)
+        
+        # Create the dialog content
+        self._create_content()
+    
+    def _create_content(self):
+        """Create the dialog content"""
+        layout = BoxLayout(orientation='vertical', padding=dp(40), spacing=dp(20))
+        
+        # Success message
+        layout.add_widget(Label(
+            text='Job Completed Successfully!',
+            size_hint_y=None,
+            height=dp(80),
+            halign='center',
+            valign='top',
+            font_size=dp(48),
+            color=THEME['secondary'],  # Green color
+            bold=True
+        ))
+        
+        layout.add_widget(Label(
+            text='All wells have been filled successfully.',
+            size_hint_y=None,
+            height=dp(60),
+            halign='center',
+            valign='top',
+            font_size=dp(32),
+            color=THEME['text_primary']  # Theme text color
+        ))
+        
+        # OK button
+        ok_btn = Button(
+            text='OK',
+            background_color=THEME['secondary'],  # Theme secondary color
+            color=THEME['text_white'],  # Theme white text
+            on_press=self.dismiss,
+            font_size=dp(24),
+            size_hint_y=None,
+            height=dp(80)
+        )
+        layout.add_widget(ok_btn)
+        
+        # Set the content
+        self.content = layout
+
+class CancelledDialog(Popup):
+    """Job cancelled dialog"""
+    
+    def __init__(self, completed_count: int, total_count: int, **kwargs):
+        self.completed_count = completed_count
+        self.total_count = total_count
+        super().__init__(**kwargs)
+        self.size_hint = (0.7, 0.5)
+        self.title = "Job Cancelled"
+        self.background = ''  # Remove default background
+        self.background_color = THEME['background']  # Theme background color
+        self.title_color = THEME['text_primary']  # Theme text color
+        self.title_size = dp(18)
+        
+        # Create the dialog content
+        self._create_content()
+    
+    def _create_content(self):
+        """Create the dialog content"""
+        layout = BoxLayout(orientation='vertical', padding=dp(40), spacing=dp(20))
+        
+        # Cancelled message
+        layout.add_widget(Label(
+            text='Job Cancelled',
+            size_hint_y=None,
+            height=dp(80),
+            halign='center',
+            valign='top',
+            font_size=dp(48),
+            color=THEME['warning'],  # Orange color
+            bold=True
+        ))
+        
+        # Progress info
+        layout.add_widget(Label(
+            text=f'Completed {self.completed_count} of {self.total_count} wells before cancellation.',
+            size_hint_y=None,
+            height=dp(60),
+            halign='center',
+            valign='top',
+            font_size=dp(28),
+            color=THEME['text_primary']  # Theme text color
+        ))
+        
+        layout.add_widget(Label(
+            text='Only completed wells have been filled with powder.',
+            size_hint_y=None,
+            height=dp(60),
+            halign='center',
+            valign='top',
+            font_size=dp(24),
+            color=THEME['text_secondary']  # Theme secondary text color
+        ))
+        
+        # OK button
+        ok_btn = Button(
+            text='OK',
+            background_color=THEME['warning'],  # Theme warning color
+            color=THEME['text_white'],  # Theme white text
+            on_press=self.dismiss,
+            font_size=dp(24),
+            size_hint_y=None,
+            height=dp(80)
+        )
+        layout.add_widget(ok_btn)
+        
+        # Set the content
+        self.content = layout
+
+class AbortedDialog(Popup):
+    """Job aborted dialog"""
+    
+    def __init__(self, completed_count: int, total_count: int, **kwargs):
+        self.completed_count = completed_count
+        self.total_count = total_count
+        super().__init__(**kwargs)
+        self.size_hint = (0.8, 0.8)
+        self.title = "Job Aborted"
+        self.background = ''  # Remove default background
+        self.background_color = THEME['background']  # Theme background color
+        self.title_color = THEME['text_primary']  # Theme text color
+        self.title_size = dp(18)
+        
+        # Create the dialog content
+        self._create_content()
+    
+    def _create_content(self):
+        """Create the dialog content"""
+        layout = BoxLayout(orientation='vertical', padding=dp(40), spacing=dp(20))
+        
+        # Aborted message
+        layout.add_widget(Label(
+            text='Job Aborted',
+            size_hint_y=None,
+            height=dp(80),
+            halign='center',
+            valign='top',
+            font_size=dp(48),
+            color=THEME['error'],  # Red color
+            bold=True
+        ))
+        
+        # Progress info
+        layout.add_widget(Label(
+            text=f'Completed {self.completed_count} of {self.total_count} wells before abort.',
+            size_hint_y=None,
+            height=dp(60),
+            halign='center',
+            valign='top',
+            font_size=dp(28),
+            color=THEME['text_primary']  # Theme text color
+        ))
+        
+        layout.add_widget(Label(
+            text='Only completed wells have been filled with powder.',
+            size_hint_y=None,
+            height=dp(60),
+            halign='center',
+            valign='top',
+            font_size=dp(24),
+            color=THEME['text_secondary']  # Theme secondary text color
+        ))
+        
+        # Important warning
+        warning_layout = BoxLayout(orientation='vertical', size_hint_y=None, height=dp(180))
+        
+        with warning_layout.canvas.before:
+            Color(rgba=THEME['error'])
+            Rectangle(pos=warning_layout.pos, size=warning_layout.size)
+        
+        warning_layout.add_widget(Label(
+            text='IMPORTANT:',
+            size_hint_y=None,
+            height=dp(40),
+            halign='center',
+            valign='top',
+            font_size=dp(32),
+            color=THEME['text_white'],  # White text on red background
+            bold=True
+        ))
+        
+        warning_layout.add_widget(Label(
+            text='The toolhead must be manually returned to the tool rack before the Jubilee is restarted.',
+            size_hint_y=None,
+            height=dp(60),
+            halign='center',
+            valign='top',
+            font_size=dp(24),
+            color=THEME['text_white'],  # White text on red background
+        ))
+        
+        warning_layout.add_widget(Label(
+            text='The power on the Jubilee must be cycled (turned off and on) before restarting.',
+            size_hint_y=None,
+            height=dp(60),
+            halign='center',
+            valign='top',
+            font_size=dp(24),
+            color=THEME['text_white'],  # White text on red background
+        ))
+        
+        layout.add_widget(warning_layout)
+        
+        # OK button
+        ok_btn = Button(
+            text='OK',
+            background_color=THEME['error'],  # Theme error color
+            color=THEME['text_white'],  # Theme white text
+            on_press=self.dismiss,
+            font_size=dp(24),
+            size_hint_y=None,
+            height=dp(80)
+        )
+        layout.add_widget(ok_btn)
+        
+        # Set the content
+        self.content = layout
 
 class ShutdownDialog(Popup):
     """Shutdown confirmation dialog"""
