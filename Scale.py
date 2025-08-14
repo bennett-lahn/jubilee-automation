@@ -9,6 +9,38 @@ LF = '\n'
 CRLF = CR + LF
 ACK = b'\x06'  # ASCII 06h
 
+# Commands that expect ACK responses
+ACK_COMMANDS = {
+    'C': False,      # Cancel - no ACK
+    'Q': False,      # Query weight - no ACK, returns data
+    'S': False,      # Stable weight - no ACK, returns data
+    'SI': False,     # Instant weight - no ACK, returns data
+    'SIR': False,    # Continuous weight - no ACK, returns data
+    '\x1bP': False,  # ESC+P - no ACK, returns data
+    'CAL': True,     # Calibrate - sends ACK when received, then ACK when executed
+    'EXC': True,     # External calibration - sends ACK
+    'OFF': True,     # Display off - sends ACK
+    'ON': True,      # Display on - sends ACK when received, then ACK when executed
+    'PRT': False,    # Print weight - no ACK, returns data
+    'R': True,       # Re-zero - sends ACK when received, then ACK when executed
+    'SMP': True,     # Sample - sends ACK
+    'T': True,       # Tare - sends ACK when received, then ACK when executed
+    'U': True,       # Mode change - sends ACK
+    '?ID': False,    # Get ID - no ACK, returns data
+    '?SN': False,    # Get serial number - no ACK, returns data
+    '?TN': False,    # Get model - no ACK, returns data
+    '?PT': False,    # Get tare weight - no ACK, returns data
+    'PT:': True,     # Set tare weight - sends ACK
+}
+
+# Commands that send two ACKs (one when received, one when executed)
+DUAL_ACK_COMMANDS = {'CAL', 'ON', 'P', 'R', 'Z', 'T'}
+
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_DELAY = 0.5  # seconds
+ACK_TIMEOUT = 5.0  # seconds for dual ACK commands
+
 class ScaleError(Enum):
     E00 = 'E00'  # Communications error
     E01 = 'E01'  # Undefined command error
@@ -24,11 +56,15 @@ class ScaleError(Enum):
     OVERLOAD = 'OVERLOAD'  # Overload state
     BAD_UNIT = 'BAD_UNIT'  # Incorrect weighing unit
     BAD_HEADER = 'BAD_HEADER'  # Unexpected header for command
+    MAX_WEIGHT = 'MAX_WEIGHT'  # Maximum weight exceeded
+    ACK_TIMEOUT = 'ACK_TIMEOUT'  # ACK timeout error
+    COMMAND_FAILED = 'COMMAND_FAILED'  # Command failed after retries
     # ... add more as needed
 
     @property
     def desc(self):
         return {
+            # TODO: Add appropriate response to errors other than hard fail
             ScaleError.E00: "Communications error: A protocol error occurred in communications. Confirm the format, baud rate and parity.",
             ScaleError.E01: "Undefined command error: An undefined command was received. Confirm the command.",
             ScaleError.E02: "Not ready: A received command cannot be processed. (e.g., not in weighing mode or busy)",
@@ -43,6 +79,9 @@ class ScaleError(Enum):
             ScaleError.OVERLOAD: "Overload error: The scale is in overload state (OL). Remove the sample from the pan.",
             ScaleError.BAD_UNIT: "Weighing unit incorrect: The unit is not '  g' (grams) as expected. Check the unit on the scale display.",
             ScaleError.BAD_HEADER: "Unexpected header: The header is not appropriate for the command context.",
+            ScaleError.MAX_WEIGHT: "Max weight exceeded: The measured weight exceeds the maximum weight allowed in the mold/container.",
+            ScaleError.ACK_TIMEOUT: "ACK timeout: The scale did not send an ACK within the expected time.",
+            ScaleError.COMMAND_FAILED: "Command failed: The command failed after multiple retry attempts.",
         }.get(self, "Unknown error code. Check error code on scale display and consult FX-120i manual.")
 
     @staticmethod
@@ -69,6 +108,12 @@ class ScaleOverloadException(ScaleException):
 
 class ScaleMaxWeightException(ScaleException):
     # to string: Max weight exceeded: The measured weight exceeds the maximum weight allowed in the mold/container.
+    pass
+
+class ScaleAckTimeoutException(ScaleException):
+    pass
+
+class ScaleCommandFailedException(ScaleException):
     pass
 
 # Data format for weight responses from the scale:
@@ -143,46 +188,120 @@ class Scale:
         """
         return self._is_connected and self.serial and self.serial.is_open
 
-    # TODO: Update to properly handle ACK; some commands send ACK, some don't
-    # Also update to handle some errors without hard fail; i.e. lost command gets resent first before throwing exception
-    # Also, not sure if response would be ACK or ACK + CRLF
-    # Also add an error if returned weight is negative and handling like re-taring
-    # Also add MAX_WEIGHT error handling (add to enum?)
+    def _wait_for_ack(self, timeout: float = ACK_TIMEOUT) -> bool:
+        """
+        Wait for an ACK response from the scale.
+        
+        Args:
+            timeout: Timeout in seconds
+            
+        Returns:
+            True if ACK received, False if timeout
+            
+        Raises:
+            ScaleException: If error response received instead of ACK
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.serial.in_waiting > 0:
+                response = self.serial.read(1)
+                if response == ACK:
+                    return True
+                elif response == b'E':  # Start of error response
+                    # Read the rest of the error line
+                    error_line = self.serial.readline()
+                    if error_line:
+                        error_response = 'E' + error_line.decode('ascii').strip()
+                        err = ScaleError.from_response(error_response)
+                        raise ScaleException(f"Scale error: {err} ({error_response})")
+                else:
+                    raise ScaleException(f"Unexpected response: {response}")
+            time.sleep(0.01)  # Small delay to prevent busy waiting
+        
+        return False
+
     def _send_command(self, cmd: str, expect_data: bool = False) -> str:
         """
-        Send a command to the scale and return the response.
-        Handles ACK, error codes, and data responses.
-        :param cmd: Command string to send
-        :param expect_data: If True, expects a data response after ACK
-        :return: Response string from the scale
+        Send a command to the scale with retry logic and ACK handling.
+        
+        Args:
+            cmd: Command string to send
+            expect_data: If True, expects a data response after ACK
+            
+        Returns:
+            Response string from the scale
+            
+        Raises:
+            ScaleException: If command fails after retries or ACK timeout
         """
-        if not self.is_connected:
-            raise ScaleException("Scale is not connected.")
-        # Send command with CR+LF
-        self.serial.reset_input_buffer()
-        self.serial.write((cmd + CRLF).encode('ascii'))
-        # Read response
-        if expect_data:
-            response = self.serial.readline()
-            if not response:
-                raise ScaleException("No response from scale (timeout).")
-            print(f"[DEBUG] Response: {response}")
-
-            # Handle ACK or error
-            if response == ACK: # Data requests may not return ACK if data is immediately available
+        # Determine if command expects ACK
+        expect_ack = ACK_COMMANDS.get(cmd, True)  # Default to True for unknown commands
+        
+        # Check if this is a dual ACK command
+        is_dual_ack = cmd in DUAL_ACK_COMMANDS
+        
+        for attempt in range(MAX_RETRIES):
+            try:
+                if not self.is_connected:
+                    raise ScaleException("Scale is not connected.")
+                
+                # Clear input buffer and send command
+                self.serial.reset_input_buffer()
+                self.serial.write((cmd + CRLF).encode('ascii'))
+                
+                if expect_ack:
+                    # Wait for first ACK
+                    if not self._wait_for_ack(ACK_TIMEOUT):
+                        if attempt < MAX_RETRIES - 1:
+                            print(f"[DEBUG] ACK timeout on attempt {attempt + 1}, retrying...")
+                            time.sleep(RETRY_DELAY)
+                            continue
+                        else:
+                            raise ScaleAckTimeoutException(f"ACK timeout for command '{cmd}' after {MAX_RETRIES} attempts")
+                    
+                    # For dual ACK commands, wait for second ACK
+                    if is_dual_ack:
+                        if not self._wait_for_ack(ACK_TIMEOUT):
+                            if attempt < MAX_RETRIES - 1:
+                                print(f"[DEBUG] Second ACK timeout on attempt {attempt + 1}, retrying...")
+                                time.sleep(RETRY_DELAY)
+                                continue
+                            else:
+                                raise ScaleAckTimeoutException(f"Second ACK timeout for dual ACK command '{cmd}' after {MAX_RETRIES} attempts")
+                
                 if expect_data:
-                    # Read next line for data
+                    # Read data response
                     data = self.serial.readline()
                     if not data:
-                        raise ScaleException("No data after ACK.")
-                    return data.decode('ascii').strip()
+                        if attempt < MAX_RETRIES - 1:
+                            print(f"[DEBUG] No data response on attempt {attempt + 1}, retrying...")
+                            time.sleep(RETRY_DELAY)
+                            continue
+                        else:
+                            raise ScaleException("No data response from scale after ACK")
+                    
+                    decoded = data.decode('ascii').strip()
+                    print(f"[DEBUG] Data response: {decoded}")
+                    
+                    # Check for error in data response
+                    if decoded.startswith('EC,'):
+                        err = ScaleError.from_response(decoded)
+                        raise ScaleException(f"Scale error in data response: {err} ({decoded})")
+                    
+                    return decoded
+                
+                # Command completed successfully
                 return 'ACK'
-            decoded = response.decode('ascii').strip()
-            if decoded.startswith('EC,'):
-                err = ScaleError.from_response(decoded)
-                raise ScaleException(f"Scale error: {err} ({decoded})")
-            return decoded
-        return None
+                
+            except (ScaleException, ScaleAckTimeoutException):
+                if attempt < MAX_RETRIES - 1:
+                    print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1}, retrying...")
+                    time.sleep(RETRY_DELAY)
+                    continue
+                else:
+                    raise
+        
+        raise ScaleCommandFailedException(f"Command '{cmd}' failed after {MAX_RETRIES} attempts")
 
     # --- Command Methods ---
     def cancel(self):
@@ -329,6 +448,7 @@ class Scale:
             if unit != '  g':
                 raise ScaleUnitException(ScaleError.BAD_UNIT.desc + f" Got '{unit}' instead.")
             if value > MAX_WEIGHT:
+                # TODO: In the future, the jubilee should respond to this exception by removing the container from the scale
                 raise ScaleMaxWeightException(ScaleError.MAX_WEIGHT.desc)
             return value if sign == '+' else -value
         except ScaleException:

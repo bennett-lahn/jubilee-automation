@@ -1,38 +1,18 @@
 {
     "tamper": {
         "motor_specs": {
-            "full_steps_per_rev": 200,
+            "full_steps_per_rev": 400,
             "rated_current": 1.5,
             "actual_current": 1.0,
             "rated_holding_torque": 0.4,
             "driver_type": "TMC2209"
         },
-        "stall_detection": {
-            "threshold": 3,
-            "filter": 1,
-            "min_speed": 200,
-            "action": 2
-        },
-        "sensorless_homing": {
-            "threshold": 3,
-            "filter": 1,
-            "action": 1,
-            "speed": 2000,
-            "acceleration": 1000,
-            "current": 0.8
-        },
-        "stall_response": {
-            "step_size": 0.1,
-            "speed": 500,
-            "shake_count": 5,
-            "shake_distance": 0.2
-        },
         "movement": {
-            "axis": "Z",
-            "driver": 2,
+            "axis": "T",
+            "driver": 0,
             "board_address": 0,
-            "speed": 1000,
-            "acceleration": 500
+            "speed": 200,
+            "acceleration": 1000
         },
         "tamping": {
             "default_depth": 5.0,
