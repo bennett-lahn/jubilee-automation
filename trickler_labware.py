@@ -1,9 +1,12 @@
 from typing import Union
 from dataclasses import dataclass
+import requests
 
 from science_jubilee.labware.Labware import Well, WellSet
 
 # TODO: x,y,z coordinates for wells need to be handled properly once their location is decided in hardware
+
+DUET_IP = "192.168.1.2"
 
 @dataclass
 class WeightWell(Well):
@@ -12,6 +15,7 @@ class WeightWell(Well):
     This class represents a well that can hold powder and tracks weight instead of volume.
     """
     valid: bool = True           # Whether the well should be used (e.g. contains a mold)
+    has_top_piston: bool = False        # Whether the well has a top piston
     current_weight: float = 0.0  # Current weight in grams
     target_weight: float = 0.0   # Target weight in grams
     max_weight: float = None     # Maximum weight capacity in grams
@@ -54,7 +58,6 @@ class WeightWell(Well):
         :rtype: float
         """
         return self.current_weight
-
 
 @dataclass(repr=False)
 class WeightWellSet(WellSet):

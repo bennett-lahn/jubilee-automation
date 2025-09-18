@@ -3,9 +3,9 @@ from science_jubilee.tools.Tool import (
     Tool,
     ToolConfigurationError,
     ToolStateError,
-    requires_active_tool,
 )
 from trickler_labware import WeightWell
+import PistonDispenser
 import time
 from typing import List, Optional, Dict, Any
 import json
@@ -21,24 +21,34 @@ import os
 
 class Manipulator(Tool):
     """
-    Jubilee toolhead with a rotary selection wheel for multiple tools.
-    Tools include: tamper, picker, cap placer.
-    The active tool is managed as a state variable.
+    Jubilee toolhead for mold handling and tamping operations.
+    Tracks a WeightWell object representing the current mold being carried.
+    
+    State tracking:
+    - current_well: WeightWell object representing the current mold (None if not carrying one)
+    - The WeightWell object tracks has_top_piston, valid, weight, and other mold properties
+    
+    Operations:
+    - Tamping: Only allowed when carrying a mold without a top piston
+    - Top piston placement: Only allowed when carrying a mold without a top piston
+    - Mold handling: Pick up and place WeightWell objects
 
     Tamping is primarily controlled using sensorless homing/stall detection, which is configured
     using the M915 command in config.g and homet.g, not this file. driver-stall.g is used to 
     control tamping after contact with the material.
     """
-    TOOL_TAMPER = 'tamper'
-    TOOL_PICKER = 'picker'
-    TOOL_CAP_PLACER = 'cap_placer'
-    TOOL_LIST = [TOOL_TAMPER, TOOL_PICKER, TOOL_CAP_PLACER]
+
+    # TODO: This is the default position of the tamper axis when moving around the platform
+    # TODO: Move global variables to different header file or something
+    # The tamper axis should be returned to this position after any functions that move the tamper complete
+    TAMP_AXIS_TRAVEL_POS = 30 # mm
+    SAFE_Z = 195 # mm
 
     def __init__(self, index, name, config=None):
         super().__init__(index, name)
-        self.active_tool = self.TOOL_PICKER  # Default tool
-        self.rotary_position = 0  # Index of the tool currently selected
+        self.current_well = None  # WeightWell object representing the current mold
         self.config = config
+        self.placed_well_on_scale = False # Do not do anything except pick up well from scale if True
         
         # Tamper-specific attributes
         self.tamper_axis = 'T'  # Default axis for tamper movement
@@ -81,7 +91,6 @@ class Manipulator(Tool):
         self.tamper_speed = movement_config.get('speed', self.tamper_speed)
         self.tamper_acceleration = movement_config.get('acceleration', self.tamper_acceleration)
 
-    @requires_active_tool
     def home_tamper(self, machine_connection=None):
         """
         Perform sensorless homing for the tamper axis.
@@ -89,9 +98,6 @@ class Manipulator(Tool):
         Args:
             machine_connection: Connection to the Jubilee machine for sending commands
         """
-        if self.active_tool != self.TOOL_TAMPER:
-            raise ToolStateError("Tamper tool must be selected to perform homing.")
-        
         if machine_connection:
             # Check if X, Y, and Z axes are homed before homing tamper
             # axes_homed: [X, Y, Z, U] (all booleans)
@@ -111,50 +117,54 @@ class Manipulator(Tool):
             self.tamper_position = 0.0
             print("Homing complete. Tamper position reset to 0.0mm")
 
-    @requires_active_tool
     def tamp(self, target_depth: float = None, machine_connection=None):
         """
-        Perform tamping action. Only allowed if tamper is active.
+        Perform tamping action. Only allowed if carrying a mold without a cap.
         Enhanced version with stall detection.
         
         Args:
             target_depth: Target depth to tamp to (mm). If None, uses default depth.
             machine_connection: Connection to the Jubilee machine for sending commands
         """
-        if self.active_tool != self.TOOL_TAMPER:
-            raise ToolStateError("Tamper tool must be selected to perform tamping.")
+        if self.current_well is None:
+            raise ToolStateError("Must be carrying a mold to perform tamping.")
+        
+        if self.current_well.has_top_piston:
+            raise ToolStateError("Cannot tamp mold that already has a top piston.")
         
         # Use default depth if not specified
         if target_depth is None:
             target_depth = self.tamper_position + 50.0  # Default 50mm tamp
         
-        if machine_connection:
-            if not machine_connection:
-                raise RuntimeError("Jubilee not connected for tamping operation.")
-            machine_connection.send_command('G91')  # Set relative mode
-            for _ in range(10):
-                machine_connection.send_command('G1 T-5 F600')  # Move tamper axis down 5mm at 600mm/min
-            machine_connection.send_command('G90')  # Set absolute mode
+        if not machine_connection:
+            raise RuntimeError("Jubilee not connected for tamping operation.")
 
-    def get_tamper_status(self) -> Dict[str, Any]:
+        print(f"Tamping mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
+        machine_connection.send_command('G91')  # Set relative mode
+        for _ in range(target_depth // 5):
+            machine_connection.send_command('G1 T-5 F600')  # Move tamper axis down 5mm at 600mm/min
+        self.vibrate_tamper(machine_connection)
+        for _ in range(target_depth // 5):
+            machine_connection.send_command('G1 T5 F600')  # Move tamper axis up 5mm at 600mm/min
+        machine_connection.send_command('G90')  # Set absolute mode
+
+    def vibrate_tamper(self, machine_connection=None):
+        # TODO: Update when Adafruit PWM I/O arrives
+        pass
+
+    def get_status(self) -> Dict[str, Any]:
         """
-        Get current tamper status and configuration.
+        Get current manipulator status and configuration.
         
         Returns:
-            Dictionary containing tamper status information
+            Dictionary containing manipulator status information
         """
-        return {
-            'active_tool': self.active_tool,
+        status = {
+            'has_mold': self.current_well is not None,
             'tamper_position': self.tamper_position,
             'stall_detection_configured': self.stall_detection_configured,
             'sensorless_homing_configured': self.sensorless_homing_configured,
             'motor_specs': self.tamper_motor_specs.copy(),
-            'stall_parameters': {
-                'threshold': self.stall_threshold,
-                'filter': self.stall_filter,
-                'min_speed': self.stall_min_speed,
-                'action': self.stall_action
-            },
             'movement_parameters': {
                 'axis': self.tamper_axis,
                 'driver': self.tamper_driver,
@@ -163,84 +173,185 @@ class Manipulator(Tool):
                 'acceleration': self.tamper_acceleration
             }
         }
+        
+        if self.current_well is not None:
+            status['current_well'] = {
+                'name': getattr(self.current_well, 'name', 'unnamed'),
+                'has_top_piston': self.current_well.has_top_piston,
+                'valid': self.current_well.valid,
+                'current_weight': self.current_well.current_weight,
+                'target_weight': self.current_well.target_weight,
+                'max_weight': self.current_well.max_weight
+            }
+        else:
+            status['current_well'] = None
+            
+        return status
 
-    @requires_active_tool
-    def pick(self):
-        """Pick up a container. Only allowed if picker is active."""
-        if self.active_tool != self.TOOL_PICKER:
-            raise ToolStateError("Picker tool must be selected to pick up a container.")
-        # TODO: Implement picker hardware action
-        print("Picking up container...")
-
-    @requires_active_tool
-    def place(self):
-        """Place down a container. Only allowed if picker is active."""
-        if self.active_tool != self.TOOL_PICKER:
-            raise ToolStateError("Picker tool must be selected to place a container.")
-        # TODO: Implement picker hardware action
-        print("Placing container...")
-
-    @requires_active_tool
-    def place_cap(self):
-        """Place a cap on a mold. Only allowed if cap placer is active."""
-        if self.active_tool != self.TOOL_CAP_PLACER:
-            raise ToolStateError("Cap placer tool must be selected to place a cap.")
-        # TODO: Implement cap placer hardware action
-        print("Placing cap on mold...")
-
-    def dispense_to_well(
-        self,
-        trickler,
-        location,
-        target_weight: float,
-        coarse_speed: int = 1000,
-        fine_speed: int = 200,
-        coarse_step_mm: float = 0.1,
-        fine_step_mm: float = 0.02,
-        settling_time_s: float = 1.0
-    ):
+    def get_current_well(self) -> Optional[WeightWell]:
         """
-        Dispense powder into a well until a target weight is reached.
-        The manipulator handles movement to the well, while the trickler handles dispensing.
+        Get the current mold being carried.
+        
+        Returns:
+            WeightWell object if carrying a mold, None otherwise
         """
-        if not trickler.scale or not trickler.scale.is_connected:
-            raise ToolStateError("Scale is not connected or provided.")
-        # TODO: Implement movement to well location using picker
-        # Example: self.pick(), move to location, self.place()
-        if hasattr(location, 'max_weight'):
-            trickler.check_weight_limit(0, target_weight, location.max_weight)
-        trickler.initialize_scale()
-        current_weight = trickler.scale.get_weight(stable=True)
-        coarse_threshold = target_weight * 0.8
-        print(f"Starting coarse dispensing to {coarse_threshold:.4f} g...")
-        while current_weight < coarse_threshold:
-            trickler.dispense_powder(coarse_step_mm, speed=coarse_speed)
-            current_weight = trickler.scale.get_weight(stable=False)
-            if current_weight >= target_weight:
-                break
-        print(f"Coarse dispensing complete. Current weight: {current_weight:.4f} g")
-        print(f"Starting fine dispensing to target {target_weight:.4f} g...")
-        while current_weight < target_weight:
-            trickler.dispense_powder(fine_step_mm, speed=fine_speed)
-            time.sleep(settling_time_s)
-            current_weight = trickler.scale.get_weight(stable=True)
-        print(f"Dispensing complete. Final weight: {current_weight:.4f} g (target: {target_weight:.4f} g)")
-        if hasattr(location, 'set_weight'):
-            location.set_weight(current_weight)
+        return self.current_well
 
-    def batch_dispense(
-        self,
-        trickler,
-        locations: List,
-        target_weights: List[float],
-    ):
+    def is_carrying_well(self) -> bool:
         """
-        Dispense powder to multiple locations to reach their respective target weights.
+        Check if the manipulator is currently carrying a mold.
+        
+        Returns:
+            True if carrying a mold, False otherwise
         """
-        if len(locations) != len(target_weights):
-            raise ToolStateError("Number of locations and target weights must match.")
-        for i, location in enumerate(locations):
-            target_weight = target_weights[i]
-            print(f"Dispensing to location {i+1}...")
-            self.dispense_to_well(trickler, location, target_weight)
-            print("-" * 20) 
+        return self.current_well is not None
+
+    # Assumes toolhead is directly above the chosen well at safe_z height with tamper axis in travel position
+    def pick_from_well(self, mold: WeightWell):
+        """Pick up mold from well. """
+        if self.current_well is not None:
+            raise ToolStateError("Already carrying a mold. Place current mold before picking up another.")
+        if mold.has_top_piston:
+            raise ToolStateError("Mold to be picked up already has a top piston.")
+        if not mold.valid:
+            raise ToolStateError("Cannot pick up an invalid mold.")
+        if self.placed_well_on_scale:
+            raise ToolStateError("Cannot pick up mold, mold currently on scale.")
+        position = machine.get_position()
+        if not (position["X"] == mold.x or position["Y"] == mold.y or position["Z"] == SAFE_Z):
+            raise ToolStateError("Toolhead is not correctly positioned over mold. Cannot pickup")
+        if not position["T"] == self.TAMPER_AXIS_TRAVEL_POS:
+            raise ToolStateError("Tamper axis did not start in travel position")
+        # TODO: Decide feedrates for movement
+        print(f"Picking up mold: {mold.name if hasattr(mold, 'name') else 'unnamed'}")
+        machine._set_absolute_positioning()
+        # current x: 210 current y: 111.5
+        machine.move(z=148 s=) # Move until tamper leadscrew almost grounded
+        machine._set_relative_positioning()
+        machine.move(y=-25.5, s=) # Move to the side of the mold
+        machine._set_absolute_positioning()
+        machine.gcode("G1 T50 FXXX") # Move mold holder down
+        machine._set_relative_positioning()
+        machine.move(y=25.5, s=) # Move back under mold
+        machine._set_absolute_positioning()
+        machine.gcode("G1 T30 FXXX") # Pick up mold and move into tamper travel position
+        machine.safe_z_movement() # Move back to safe z
+        # TODO: Verify accuracy of actual vs expected mold location
+        self.current_well = mold
+
+    def place_in_well(self) -> WeightWell:
+        """Place down the current mold and return it."""
+        if self.current_well is None:
+            raise ToolStateError("No mold to place.")
+        if not mold.valid:
+            raise ToolStateError("Cannot pick up an invalid mold.")
+        if self.placed_well_on_scale:
+            raise ToolStateError("Cannot pick up mold, mold currently on scale.")
+        position = machine.get_position()
+        if not (position["X"] == mold.x or position["Y"] == mold.y or position["Z"] == SAFE_Z):
+            raise ToolStateError("Toolhead is not correctly positioned over mold. Cannot pickup")
+        if not position["T"] == self.TAMPER_AXIS_TRAVEL_POS:
+            raise ToolStateError("Tamper axis did not start in travel position")
+        # TODO: Decide feedrates for movement
+        # TODO: Verify accuracy of actual vs expected mold location
+        mold_to_place = self.current_well
+        self.current_well = None
+        print(f"Placing mold: {mold_to_place.name if hasattr(mold_to_place, 'name') else 'unnamed'}")
+        machine._set_absolute_positioning()
+        machine.move(z=148 s=) # Move until tamper leadscrew almost grounded
+        machine.gcode("G1 T50 FXXX") # Put down mold holder
+        machine._set_relative_positioning()
+        machine.move(y=-25.5, s=) # Move out from under mold
+        machine._set_absolute_positioning()
+        machine.gcode("G1 T30 FXXX") # Move into tamper travel position
+        machine.safe_z_movement() # Move back to safe z
+        return mold_to_place
+
+    def place_top_piston(self, machine: Machine, piston_dispenser: PistonDispenser):
+        """
+        Place the top piston on the current mold. Only allowed if carrying a mold without a top piston.
+        """
+        if self.current_well is None:
+            raise ToolStateError("Must be carrying a mold to place a top piston.")
+        
+        if self.current_well.has_top_piston:
+            raise ToolStateError("Mold already has a top piston.")
+
+        if piston_dispenser.num_pistons == 0:
+            raise ToolStateError("No pistons in dispenser.")
+        if self.placed_well_on_scale:
+            raise ToolStateError("Cannot add top piston, mold on scale.")
+
+        position = machine.get_position()
+        x = position['X']
+        if not x == piston_dispenser.x:
+            raise ToolStateError("X position does not match piston dispenser location.")
+        y = position['Y']
+        if not y == piston_dispenser.y:
+            raise ToolStateError("Y position does not match piston dispenser location.")
+        t = position['T']
+        if not t == TAMPER_AXIS_TRAVEL_POS:
+            raise ToolStateError("Tamper axis did not start in travel position.")
+        if not z == SAFE_Z:
+            raise ToolStateError("Z position did not start at safe z.")
+        
+        
+        # TODO: Implement top piston placer hardware action
+        self.current_well.has_top_piston = True
+        print(f"Placing top piston on mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
+        return True
+    
+
+    # This macro assumes that the gantry has been moved to a known location in front of and above the trickler dispenser
+    def place_mold_on_scale(self, machine: Machine, scale: Scale):
+        """
+        Place the current mold on the scale. Only allowed if carrying a mold without a top piston.
+        """
+        if self.current_well is None:
+            raise ToolStateError("Must be carrying a mold to place on the scale.")
+        
+        if self.current_well.has_top_piston:
+            raise ToolStateError("Mold already has a top piston.")
+        position = machine.get_position()
+        x = position['X']
+        if not x == scale.x:
+            raise ToolStateError("X position does not match scale location.")
+        y = position['Y']
+        if not y == scale.y:
+            raise ToolStateError("Y position does not match scale location.")
+        z = position['Z']
+        if not z == scale.z:
+            raise ToolStateError("Z position does not match scale location.")
+        t = position['T']
+        if not t == TAMPER_AXIS_TRAVEL_POS:
+            raise ToolStateError("T axis was not in travel position")
+        print(f"Placing mold on scale: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
+        self.placed_well_on_scale = True
+        # TODO: Decide feedrate for moves
+        machine._set_absolute_positioning() # Set absolute mode
+        machine.move_to(z=134, s=) # Move to 5mm above scale
+        machine.gcode("G1 T38.5 FXXX") # Move well so it fits under trickler
+        machine.move(y=184, s=) # Move well under trickler
+        machine.gcode("G1 T45 FXXX") # Place well on scale
+        return True
+
+    # Macro can/should only be called if a mold has been placed under the trickler 
+    def pick_mold_from_scale(self, machine: Machine, scale: Scale):
+        """
+        Pick up the current mold from the scale. Only allowed if carrying a mold without a top piston.
+        """
+        if self.current_well is None:
+            raise ToolStateError("Must be carrying a mold to pick from the scale.")
+        
+        if self.current_well.has_top_piston:
+            raise ToolStateError("Mold already has a top piston.")
+        if not self.placed_well_on_scale:
+            raise ToolStateError("Well is not on scale, cannot pick up")
+        print(f"Picking mold from scale: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
+        # TODO: Decide feedrate for moves
+        machine._set_absolute_positioning()
+        machine.gcode("G1 T38.5 FXXX") # Pick up mold
+        machine.move(y=scale.y, s=) # Move from under trickler
+        machine.safe_z_movement() # Move to safe z
+        machine.gcode("G1 T{TAMP_AXIS_TRAVEL_POS} FXXX") # Move tamper back to travel position
+        return True

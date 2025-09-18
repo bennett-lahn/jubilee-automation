@@ -5,7 +5,9 @@ class PistonDispenser:
     """
     index : int      # index of the dispenser on the side of the Jubilee
     num_pistons: int # number of pistons in the dispenser
-
+    x: float         # x coordinate of the dispenser
+    y: float         # y coordinate of the dispenser
+    z: float         # z coordinate of the dispenser
 
     def __init__(self, index, num_pistons):
         self.index = index

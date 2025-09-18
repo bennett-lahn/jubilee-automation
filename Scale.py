@@ -149,6 +149,9 @@ class Scale:
         self.timeout = timeout
         self.serial = None
         self._is_connected = False
+        self.x = ... # x coordinate of the scale
+        self.y = ... # y coordinate of the scale
+        self.z = ... # z coordinate of the scale
 
     def connect(self):
         """
