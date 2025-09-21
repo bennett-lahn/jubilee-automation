@@ -42,11 +42,13 @@ class Manipulator(Tool):
     # TODO: Move global variables to different header file or something
     # The tamper axis should be returned to this position after any functions that move the tamper complete
     TAMP_AXIS_TRAVEL_POS = 30 # mm
+    DISPENSER_SAFE_Z = 254 # mm, z should be set to this height before moving to cap dispenser ready point or gantry will hit trickler
     SAFE_Z = 195 # mm
 
-    def __init__(self, index, name, config=None):
+    def __init__(self, index, name, machine=None, config=None):
         super().__init__(index, name)
         self.current_well = None  # WeightWell object representing the current mold
+        self.machine = machine # Attached jubilee machine object
         self.config = config
         self.placed_well_on_scale = False # Do not do anything except pick up well from scale if True
         
@@ -64,8 +66,6 @@ class Manipulator(Tool):
             'driver_type': 'TMC2209'  # Driver type for configuration
         }
         
-        # Event handling
-        self.tamper_position = 0.0  # Current tamper position in mm
         self.tamper_speed = 1000  # mm/min for tamper movement
         self.tamper_acceleration = 500  # mm/s² for tamper movement
 
@@ -98,25 +98,20 @@ class Manipulator(Tool):
         Args:
             machine_connection: Connection to the Jubilee machine for sending commands
         """
-        if machine_connection:
-            # Check if X, Y, and Z axes are homed before homing tamper
-            # axes_homed: [X, Y, Z, U] (all booleans)
-            axes_homed = getattr(machine_connection, 'axes_homed', [False, False, False, False])
-            axis_names = ['X', 'Y', 'Z', 'U']
-            not_homed = [axis_names[i] for i in range(4) if not axes_homed[i]]  # Only check X, Y, Z
-            if not_homed:
-                print(f"Axes not homed: {', '.join(not_homed)}")
-                raise RuntimeError("X, Y, Z, and U axes must be homed before homing the tamper (T) axis.")
-            # Perform homing for tamper axis
-            machine_connection.send_command('M98 P"homet.g"')
-            
-            # Wait for homing to complete
-            time.sleep(5.0)  # Adjust based on homing time
-            
-            # Reset position to 0 after homing
-            self.tamper_position = 0.0
-            print("Homing complete. Tamper position reset to 0.0mm")
+        if not self.machine_connection
 
+        axes_homed = getattr(machine_connection, 'axes_homed', [False, False, False, False])
+        axis_names = ['X', 'Y', 'Z', 'U']
+        not_homed = [axis_names[i] for i in range(4) if not axes_homed[i]]  # Only check X, Y, Z
+        if not_homed:
+            print(f"Axes not homed: {', '.join(not_homed)}")
+            raise RuntimeError("X, Y, Z, and U axes must be homed before homing the tamper (T) axis.")
+        # Perform homing for tamper axis
+        machine_connection.send_command('M98 P"homet.g"')
+        
+        print("Homing complete. Tamper position reset to 0.0mm")
+
+    # TODO: Figure out how to merge stall detection with this function so that we can handle stall detection gracefully
     def tamp(self, target_depth: float = None, machine_connection=None):
         """
         Perform tamping action. Only allowed if carrying a mold without a cap.
@@ -128,25 +123,21 @@ class Manipulator(Tool):
         """
         if self.current_well is None:
             raise ToolStateError("Must be carrying a mold to perform tamping.")
-        
         if self.current_well.has_top_piston:
             raise ToolStateError("Cannot tamp mold that already has a top piston.")
-        
-        # Use default depth if not specified
-        if target_depth is None:
-            target_depth = self.tamper_position + 50.0  # Default 50mm tamp
-        
         if not machine_connection:
             raise RuntimeError("Jubilee not connected for tamping operation.")
-
+        if not self.current_well.placed_well_on_scale:
+            raise ToolStateError("Cannot tamp, no mold on scale.")
         print(f"Tamping mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
-        machine_connection.send_command('G91')  # Set relative mode
-        for _ in range(target_depth // 5):
-            machine_connection.send_command('G1 T-5 F600')  # Move tamper axis down 5mm at 600mm/min
-        self.vibrate_tamper(machine_connection)
-        for _ in range(target_depth // 5):
-            machine_connection.send_command('G1 T5 F600')  # Move tamper axis up 5mm at 600mm/min
-        machine_connection.send_command('G90')  # Set absolute mode
+        
+        machine._set_absolute_positioning();
+        machine.gcode("G1 T38.5 FXXX") # Pick up mold
+        machine.move(y=scale.y, s=) # Move from under trickler
+        machine.gcode("G1 T0 FXXX") # Move tamper until stall detection stops movement
+        
+        
+
 
     def vibrate_tamper(self, machine_connection=None):
         # TODO: Update when Adafruit PWM I/O arrives
@@ -161,7 +152,6 @@ class Manipulator(Tool):
         """
         status = {
             'has_mold': self.current_well is not None,
-            'tamper_position': self.tamper_position,
             'stall_detection_configured': self.stall_detection_configured,
             'sensorless_homing_configured': self.sensorless_homing_configured,
             'motor_specs': self.tamper_motor_specs.copy(),
@@ -225,7 +215,6 @@ class Manipulator(Tool):
         # TODO: Decide feedrates for movement
         print(f"Picking up mold: {mold.name if hasattr(mold, 'name') else 'unnamed'}")
         machine._set_absolute_positioning()
-        # current x: 210 current y: 111.5
         machine.move(z=148 s=) # Move until tamper leadscrew almost grounded
         machine._set_relative_positioning()
         machine.move(y=-25.5, s=) # Move to the side of the mold
@@ -292,15 +281,23 @@ class Manipulator(Tool):
         t = position['T']
         if not t == TAMPER_AXIS_TRAVEL_POS:
             raise ToolStateError("Tamper axis did not start in travel position.")
-        if not z == SAFE_Z:
-            raise ToolStateError("Z position did not start at safe z.")
-        
-        
-        # TODO: Implement top piston placer hardware action
-        self.current_well.has_top_piston = True
+        if not z == DISPENSER_SAFE_Z:
+            raise ToolStateError("Z position did not start at dispenser safe z.")
         print(f"Placing top piston on mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
+
+        # TODO: Decide on movement feed rates
+        machine._set_absolute_positioning()
+        machine.gcode("G1 T52 FXXX") # Fully lower mold
+        machine.move(z=189 s=...) # Move so mold will fit just under cap
+        machie._set_relative_positioning()
+        machine.move(y=35 s=...) # Move under cap dispenser so that cap drops; each piston_dispenser x/y is 35mm away from the middle point
+        machine._set_absolute_positioning()
+        machine.gcode("G1 T37.3 FXXX") # Move tamper to pick up cap # TODO: Not sure the tolerances line up here to actually pick up the cap
+        machine.move(x=piston_dispenser.x, y=piston_dispenser.y, s=...) # Return to start point
+        machine.gcode("G1 T{TAMPER_AXIS_TRAVEL_POS} FXXX") # Move tamper back to travel position
+        self.current_well.has_top_position = True
+        self.current_well.has_top_piston = True
         return True
-    
 
     # This macro assumes that the gantry has been moved to a known location in front of and above the trickler dispenser
     def place_mold_on_scale(self, machine: Machine, scale: Scale):

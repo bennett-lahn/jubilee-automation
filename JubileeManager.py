@@ -33,6 +33,15 @@ class JubileeManager:
         self.manipulator: Optional[Manipulator] = None
         self.connected = False
         self.piston_dispensers: List[PistonDispenser] = [PistonDispenser(i, num_pistons_per_dispenser) for i in range(num_piston_dispensers)]
+
+        # Dispenser 0 is always at x=320, y=337 and future dispensers are each offset by 42.5 mm in the x-axis
+        # The stored x/y is the "ready point" 35mm in front of the dispenser
+        num = 0
+        for dispenser in piston_dispensers:
+            dispenser.x = 320 + num*42.5
+            dispenser.y = 337
+            num = num + 1
+            
         self.well_set: WeightWellSet = WeightWellSet()
         self.well_set['A1'] = WeightWell(name='A1', x=0, y=0, z=0, target_weight=0)
         self.well_set['A2'] = WeightWell(name='A2', x=0, y=0, z=0, target_weight=0)
@@ -76,6 +85,7 @@ class JubileeManager:
 
             self.machine.home_xyu()
             self.machine.home_z()
+            # TODO: Update this to control machine moves to/from a safe location so that dispenser or trickler collisions don't occur
             self.machine.pickup_tool(self.manipulator)
             self.manipulator.home_tamper(self.machine)
 
@@ -153,10 +163,9 @@ class JubileeManager:
         try:
             x = piston_dispensers[dispenser_index].x
             y = piston_dispensers[dispenser_index].y
-            z = piston_dispensers[dispenser_index].z
 
-            self.machine.safe_z_movement()
-            self.machine.move_to(x=x, y=y, z=z)
+            self.machine.move(z=DISPENSER_SAFE_Z)
+            self.machine.move_to(x=x, y=y)
             self.manipulator.place_top_piston(self.machine, self.piston_dispensers[dispenser_index])
             self.piston_dispensers[dispenser_index].remove_piston()
             self.well_set[well_id].set_piston(True)
