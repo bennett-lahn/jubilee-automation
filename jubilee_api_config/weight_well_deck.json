@@ -1,0 +1,92 @@
+{
+    "bedType": "Weight Well Deck",
+    "deckSlots": {
+        "total": 16,
+        "type": "SLAS"
+    },
+    "offsetFrom": "top-left",
+    "deck_material": "aluminum",
+    "safe_z": 195,
+    "slots": {
+        "0": {
+            "offset": [50, 50],
+            "has_labware": false,
+            "labware": ""
+        },
+        "1": {
+            "offset": [150, 50],
+            "has_labware": false,
+            "labware": ""
+        },
+        "2": {
+            "offset": [250, 50],
+            "has_labware": false,
+            "labware": ""
+        },
+        "3": {
+            "offset": [350, 50],
+            "has_labware": false,
+            "labware": ""
+        },
+        "4": {
+            "offset": [50, 150],
+            "has_labware": false,
+            "labware": ""
+        },
+        "5": {
+            "offset": [150, 150],
+            "has_labware": false,
+            "labware": ""
+        },
+        "6": {
+            "offset": [250, 150],
+            "has_labware": false,
+            "labware": ""
+        },
+        "7": {
+            "offset": [350, 150],
+            "has_labware": false,
+            "labware": ""
+        },
+        "8": {
+            "offset": [50, 250],
+            "has_labware": false,
+            "labware": ""
+        },
+        "9": {
+            "offset": [150, 250],
+            "has_labware": false,
+            "labware": ""
+        },
+        "10": {
+            "offset": [250, 250],
+            "has_labware": false,
+            "labware": ""
+        },
+        "11": {
+            "offset": [350, 250],
+            "has_labware": false,
+            "labware": ""
+        },
+        "12": {
+            "offset": [50, 350],
+            "has_labware": false,
+            "labware": ""
+        },
+        "13": {
+            "offset": [150, 350],
+            "has_labware": false,
+            "labware": ""
+        },
+        "14": {
+            "offset": [250, 350],
+            "has_labware": false,
+            "labware": ""
+        },
+        "15": {
+            "offset": [350, 350],
+            "has_labware": false,
+            "labware": ""
+        }
+    }
+}

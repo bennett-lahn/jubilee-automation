@@ -1,0 +1,46 @@
+{
+    "name": "Weight Well",
+    "version": 1,
+    "description": "A single weight well for powder dispensing",
+    "namespace": "jubilee_automation",
+    "dimensions": {
+        "xDimension": 20,
+        "yDimension": 20,
+        "zDimension": 10
+    },
+    "wells": {
+        "A1": {"x": 10, "y": 10, "z": 0},
+        "A2": {"x": 10, "y": 10, "z": 0},
+        "A3": {"x": 10, "y": 10, "z": 0},
+        "A4": {"x": 10, "y": 10, "z": 0},
+        "B1": {"x": 10, "y": 10, "z": 0},
+        "B2": {"x": 10, "y": 10, "z": 0},
+        "B3": {"x": 10, "y": 10, "z": 0},
+        "B4": {"x": 10, "y": 10, "z": 0},
+        "C1": {"x": 10, "y": 10, "z": 0},
+        "C2": {"x": 10, "y": 10, "z": 0},
+        "C3": {"x": 10, "y": 10, "z": 0},
+        "C4": {"x": 10, "y": 10, "z": 0},
+        "D1": {"x": 10, "y": 10, "z": 0},
+        "D2": {"x": 10, "y": 10, "z": 0},
+        "D3": {"x": 10, "y": 10, "z": 0},
+        "D4": {"x": 10, "y": 10, "z": 0},
+    },
+    "groups": {
+        "wells": {
+            "A1": ["A1"], "A2": ["A2"], "A3": ["A3"], "A4": ["A4"],
+            "B1": ["B1"], "B2": ["B2"], "B3": ["B3"], "B4": ["B4"],
+            "C1": ["C1"], "C2": ["C2"], "C3": ["C3"], "C4": ["C4"],
+            "D1": ["D1"], "D2": ["D2"], "D3": ["D3"], "D4": ["D4"]
+        }
+    },
+    "brand": {
+        "brand": "Jubilee Automation",
+        "brandId": ["weight_well"]
+    },
+    "metadata": {
+        "displayName": "Weight Well",
+        "displayCategory": "well",
+        "displayVolumeUnits": "g"
+    }
+}

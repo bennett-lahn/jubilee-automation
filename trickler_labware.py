@@ -6,8 +6,6 @@ from science_jubilee.labware.Labware import Well, WellSet
 
 # TODO: x,y,z coordinates for wells need to be handled properly once their location is decided in hardware
 
-DUET_IP = "192.168.1.2"
-
 @dataclass
 class WeightWell(Well):
     """A wrapper class for Well that uses weight (in grams) instead of liquid volume.

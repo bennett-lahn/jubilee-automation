@@ -10,6 +10,8 @@ import time
 from typing import List, Optional, Dict, Any
 import json
 import os
+from config_loader import config
+from functools import wraps
 
 # Fixed tamp, claw moves mold up into tamp
 # Cap silo/hopper
@@ -18,6 +20,103 @@ import os
 # rotate tamper to remove powder
 # no rotary toolhead / ignore for now ; fixed tamper
     # For now focus on figuring out how to detect stop using motor torque/current
+
+def requires_safe_z_manipulator(func):
+    """
+    Decorator for Manipulator methods that require safe Z height.
+    Assumes the decorated method belongs to a class with:
+    - self.machine_connection (Machine object)
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self.machine_connection:
+            raise RuntimeError("Machine connection not available")
+        
+        # Get current Z position
+        current_z = float(self.machine_connection.get_position()["Z"])
+        
+        # Get safe Z height from config
+        safe_z = config.get_safe_z()
+        
+        # Move to safe height if needed
+        if current_z < safe_z:
+            safe_height = safe_z + config.get_safe_z_offset()
+            self.machine_connection.move_to(z=safe_height)
+        
+        return func(self, *args, **kwargs)
+    
+    return wrapper
+
+def requires_carrying_mold(func):
+    """
+    Decorator for methods that require carrying a mold.
+    Checks that self.current_well is not None.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if self.current_well is None:
+            raise ToolStateError("Must be carrying a mold to perform this operation.")
+        return func(self, *args, **kwargs)
+    
+    return wrapper
+
+def requires_not_carrying_mold(func):
+    """
+    Decorator for methods that require NOT carrying a mold.
+    Checks that self.current_well is None.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if self.current_well is not None:
+            raise ToolStateError("Already carrying a mold. Place current mold before performing this operation.")
+        return func(self, *args, **kwargs)
+    
+    return wrapper
+
+def requires_mold_without_piston(func):
+    """
+    Decorator for methods that require the current mold to not have a top piston.
+    Checks that self.current_well.has_top_piston is False.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if self.current_well is None:
+            raise ToolStateError("Must be carrying a mold to perform this operation.")
+        if self.current_well.has_top_piston:
+            raise ToolStateError("Cannot perform operation on mold that already has a top piston.")
+        return func(self, *args, **kwargs)
+    
+    return wrapper
+
+def requires_valid_mold(func):
+    """
+    Decorator for methods that require a valid mold parameter.
+    Checks that the first argument (mold) is valid.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if args and hasattr(args[0], 'valid'):
+            mold = args[0]
+            if not mold.valid:
+                raise ToolStateError("Cannot perform operation on an invalid mold.")
+        return func(self, *args, **kwargs)
+    
+    return wrapper
+
+def requires_machine_connection(func):
+    """
+    Decorator for methods that require a machine connection.
+    Checks that self.machine_connection is available.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self.machine_connection:
+            raise RuntimeError("Machine connection not available for this operation.")
+        return func(self, *args, **kwargs)
+    
+    return wrapper
+
+# Error checks have been moved into decorators above
 
 class Manipulator(Tool):
     """
@@ -98,8 +197,9 @@ class Manipulator(Tool):
         Args:
             machine_connection: Connection to the Jubilee machine for sending commands
         """
-        if not self.machine_connection
-
+        if not self.machine_connection:
+            raise RuntimeError("Machine connection not available for tamper homing.")
+            
         axes_homed = getattr(machine_connection, 'axes_homed', [False, False, False, False])
         axis_names = ['X', 'Y', 'Z', 'U']
         not_homed = [axis_names[i] for i in range(4) if not axes_homed[i]]  # Only check X, Y, Z
@@ -112,6 +212,9 @@ class Manipulator(Tool):
         print("Homing complete. Tamper position reset to 0.0mm")
 
     # TODO: Figure out how to merge stall detection with this function so that we can handle stall detection gracefully
+    @requires_carrying_mold
+    @requires_mold_without_piston
+    @requires_machine_connection
     def tamp(self, target_depth: float = None, machine_connection=None):
         """
         Perform tamping action. Only allowed if carrying a mold without a cap.
@@ -121,12 +224,6 @@ class Manipulator(Tool):
             target_depth: Target depth to tamp to (mm). If None, uses default depth.
             machine_connection: Connection to the Jubilee machine for sending commands
         """
-        if self.current_well is None:
-            raise ToolStateError("Must be carrying a mold to perform tamping.")
-        if self.current_well.has_top_piston:
-            raise ToolStateError("Cannot tamp mold that already has a top piston.")
-        if not machine_connection:
-            raise RuntimeError("Jubilee not connected for tamping operation.")
         if not self.current_well.placed_well_on_scale:
             raise ToolStateError("Cannot tamp, no mold on scale.")
         print(f"Tamping mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
@@ -197,14 +294,13 @@ class Manipulator(Tool):
         return self.current_well is not None
 
     # Assumes toolhead is directly above the chosen well at safe_z height with tamper axis in travel position
+    @requires_safe_z_manipulator
+    @requires_not_carrying_mold
+    @requires_valid_mold
     def pick_from_well(self, mold: WeightWell):
         """Pick up mold from well. """
-        if self.current_well is not None:
-            raise ToolStateError("Already carrying a mold. Place current mold before picking up another.")
         if mold.has_top_piston:
             raise ToolStateError("Mold to be picked up already has a top piston.")
-        if not mold.valid:
-            raise ToolStateError("Cannot pick up an invalid mold.")
         if self.placed_well_on_scale:
             raise ToolStateError("Cannot pick up mold, mold currently on scale.")
         position = machine.get_position()
@@ -228,12 +324,9 @@ class Manipulator(Tool):
         # TODO: Verify accuracy of actual vs expected mold location
         self.current_well = mold
 
+    @requires_carrying_mold
     def place_in_well(self) -> WeightWell:
         """Place down the current mold and return it."""
-        if self.current_well is None:
-            raise ToolStateError("No mold to place.")
-        if not mold.valid:
-            raise ToolStateError("Cannot pick up an invalid mold.")
         if self.placed_well_on_scale:
             raise ToolStateError("Cannot pick up mold, mold currently on scale.")
         position = machine.get_position()
@@ -256,15 +349,12 @@ class Manipulator(Tool):
         machine.safe_z_movement() # Move back to safe z
         return mold_to_place
 
+    @requires_carrying_mold
+    @requires_mold_without_piston
     def place_top_piston(self, machine: Machine, piston_dispenser: PistonDispenser):
         """
         Place the top piston on the current mold. Only allowed if carrying a mold without a top piston.
         """
-        if self.current_well is None:
-            raise ToolStateError("Must be carrying a mold to place a top piston.")
-        
-        if self.current_well.has_top_piston:
-            raise ToolStateError("Mold already has a top piston.")
 
         if piston_dispenser.num_pistons == 0:
             raise ToolStateError("No pistons in dispenser.")
@@ -300,15 +390,13 @@ class Manipulator(Tool):
         return True
 
     # This macro assumes that the gantry has been moved to a known location in front of and above the trickler dispenser
+    @requires_safe_z_manipulator
+    @requires_carrying_mold
+    @requires_mold_without_piston
     def place_mold_on_scale(self, machine: Machine, scale: Scale):
         """
         Place the current mold on the scale. Only allowed if carrying a mold without a top piston.
         """
-        if self.current_well is None:
-            raise ToolStateError("Must be carrying a mold to place on the scale.")
-        
-        if self.current_well.has_top_piston:
-            raise ToolStateError("Mold already has a top piston.")
         position = machine.get_position()
         x = position['X']
         if not x == scale.x:
@@ -333,15 +421,13 @@ class Manipulator(Tool):
         return True
 
     # Macro can/should only be called if a mold has been placed under the trickler 
+    @requires_safe_z_manipulator
+    @requires_carrying_mold
+    @requires_mold_without_piston
     def pick_mold_from_scale(self, machine: Machine, scale: Scale):
         """
         Pick up the current mold from the scale. Only allowed if carrying a mold without a top piston.
         """
-        if self.current_well is None:
-            raise ToolStateError("Must be carrying a mold to pick from the scale.")
-        
-        if self.current_well.has_top_piston:
-            raise ToolStateError("Mold already has a top piston.")
         if not self.placed_well_on_scale:
             raise ToolStateError("Well is not on scale, cannot pick up")
         print(f"Picking mold from scale: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
