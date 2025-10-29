@@ -3,14 +3,15 @@
 ; Note: tool offsets are applied at this point!
 ; Note that commands preempted with G53 will NOT apply the tool offset.
 
-; M116 P1                    ; Wait for set temperatures to be reached
-; M302 P1                    ; Prevent Cold Extrudes, just in case temp setpoints are at 0
+; M116 P1                  ; Wait for set temperatures to be reached
+; M302 P1                  ; Prevent Cold Extrudes, just in case temp setpoints are at 0
 
 G90                        ; Ensure the machine is in absolute mode before issuing movements.
 
-G53 G1 X20.0 F6000           ; Move to the pickup position with tool-1.
-G53 G1 Y340.0 F6000
+G53 G1 X40.0 F500       ; Move to the pickup position with tool-0.
+G53 G1 Y318.0 F500
 M98 P"/macros/tool_lock.g" ; Lock the tool
+G53 G1 Y270.0 F500        ; Back off the tool post
 
 G1 R2 Z0                   ; Restore prior Z position before tool change was initiated.
                            ; Note: tool tip position is automatically saved to slot 2 upon the start of a tool change.

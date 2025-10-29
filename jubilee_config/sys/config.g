@@ -37,8 +37,8 @@ M950 E0 C"led" T1 Q3000000   ; create a RGB Neopixel LED strip on the LED port a
 M584 X1.0 Y1.1            ; X and Y for CoreXY
 M584 U1                   ; U for toolchanger lock
 M584 Z2:3:4               ; Z has three drivers for kinematic bed suspension. 
-M584 E0.0           	     ; extruder
-M584 M0                   ; Manipulator axis
+; M584 E0.0           	     ; extruder
+M584 V1.2                 ; Manipulator axis
 
 
 M569 P1.0 S0 D2            ; 3HC Drive 0 | X stepper | Port 0
@@ -56,12 +56,12 @@ M569 P0.1 S0               ; Drive 1 | U Tool Changer Lock  670mA
 M906 U670 I60              ; 100% of 670mA RMS. idle 60%
                            ; Note that the idle will be shared for all drivers
 
-M569 P0.0 S3 D2 V100       ; Drive 0 | Manipulator axis | Turn on stealthChop for sensorless homing, stall detection
+M569 P1.2 S3 D2 V100       ; Drive 0 | Manipulator axis | Turn on stealthChop for sensorless homing, stall detection
 M569 P0.2 S0               ; Drive 2 | Front Left Z
 M569 P0.3 S0               ; Drive 3 | Front Right Z
 M569 P0.4 S0               ; Drive 4 | Back Z
 M906 Z{0.7*sqrt(2)*1680}   ; 70% of 1680mA RMS
-M906 M{0.7*sqrt(2)*1680}
+M906 V{0.8*sqrt(2)*1000}   ; 80% of 1000mA RMS for 1A rated manipulator stepper
 
 M906 E{0.8*1300}
 
@@ -88,7 +88,7 @@ M92 X{1/(1.8*16/180)}   ; step angle * tooth count / 180
 M92 Y{1/(1.8*16/180)}   ; The 2mm tooth spacing cancel out with diam to radius
 M92 Z{360/1.8/2}        ; 1.8 deg stepper / lead (2mm) of screw for Roumeli Lab
 M92 U{13.76/1.8}        ; gear ratio / step angle for tool lock geared motor.
-M92 M{1/(1.8*16/180)}   ; step angle * tooth count / 180
+M92 V{3200/2}           ; 3200 steps/rev (1.8° × 16 microsteps) / 2mm leadscrew pitch
 ;M92 E51.875            ; Extruder - BMG 0.9 deg/step
 M92 E8000			;gel extruder
 
@@ -106,12 +106,15 @@ M201 X1500 Y1500                        ; Accelerations (mm/s^2)
 M201 Z100                               ; LDO ZZZ Acceleration
 M201 U800                               ; LDO U Accelerations (mm/s^2)
 M201 E1000                              ; Extruder
-M201 M800                               ; Manipulator
+M201 V800                               ; Manipulator
 
-M203 X18000 Y18000 Z800 U9000           ; Maximum axis speeds (mm/min)
+M203 X18000 Y18000 Z800 U9000 V3000     ; Maximum axis speeds (mm/min)
 M203 E500 M400
-M566 X500 Y500 Z500 E3000 U50 M500      ; Maximum jerk speeds (mm/min)
+M566 X500 Y500 Z500 E3000 U50 V50 M500  ; Maximum jerk speeds (mm/min)
 
+; Servos
+;-------------------------------------------------------------------------------
+M950 S0 C"laser" ; assign GPIO port 0 to LASER/VFD port, servo mode for the trickler servo
 
 
 
@@ -121,7 +124,7 @@ M566 X500 Y500 Z500 E3000 U50 M500      ; Maximum jerk speeds (mm/min)
 M574 X1 S1 P"^1.io0.in"  ; 3HC homing position X1 = axis min, type S1 = switch
 M574 Y1 S1 P"^1.io1.in"  ; 3HC homing position Y1 = axis min, type S1 = switch
 M574 U1 S1 P"^io1.in"    ; homing position U1 = axis min, type S1 = switch
-M574 M1 S3               ; Manipulator
+M574 V1 S3               ; Manipulator
 
 
 M574 Z0                  ; we will use the switch as a Z probe not endstop 
@@ -133,17 +136,12 @@ G31 K0 X0 Y0 Z-2         ; Set the limit switch as the "Control Point"
 ; Set axis software limits and min/max switch-triggering positions.
 ; Adjusted such that (0,0) lies at the lower left corner of a 300x300mm square 
 ; in the 305mmx305mm build plate.
-M208 X-13.75:313.75 Y-44:341 Z0:295 V0:480
+M208 X-13.75:313.75 Y-44:341 Z0:295 V-50000:50000
 M208 U0:200            ; Set Elastic Lock (U axis) max rotation angle
-M208 M0:100C           ; Tamper min and max
 
 ; Manipulator stall detection
-; M = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event
-M915 M S3 F1 H200 R2
-
-; Z-axis stall detection for tamping
-; M = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event
-M915 Z S3 F1 H200 R2
+; V = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event
+; M915 V S3 F1 H200 R2
 
 ; Heaters and temperature sensors
 ;-------------------------------------------------------------------------------
@@ -161,7 +159,7 @@ M140 H0                             ; Assign H0 to the bed
 
 ; Tools
 ; Call out to the tool-specific file 
-M98 P"/sys/syringe-extruder.g" ; syringe extruder is tool 0
+M98 P"/sys/manipulator.g" ; syringe extruder is tool 0
 
 
 ; Heaters and sensors must be wired to main board for PID tuning (3.2.0-beta4)
