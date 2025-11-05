@@ -38,7 +38,7 @@ DUAL_ACK_COMMANDS = {'CAL', 'ON', 'P', 'R', 'Z', 'T'}
 
 # Retry configuration
 MAX_RETRIES = 3
-RETRY_DELAY = 0.5  # seconds
+RETRY_DELAY = 5  # seconds
 ACK_TIMEOUT = 5.0  # seconds for dual ACK commands
 
 class ScaleError(Enum):
@@ -191,7 +191,7 @@ class Scale:
         """
         return self._is_connected and self.serial and self.serial.is_open
 
-    def _wait_for_ack(self, timeout: float = ACK_TIMEOUT) -> bool:
+    def _wait_for_ack(self, timeout: float = ACK_TIMEOUT) -> tuple:
         """
         Wait for an ACK response from the scale.
         
@@ -199,29 +199,54 @@ class Scale:
             timeout: Timeout in seconds
             
         Returns:
-            True if ACK received, False if timeout
+            Tuple of (success: bool, received_data: bytes)
             
         Raises:
             ScaleException: If error response received instead of ACK
         """
         start_time = time.time()
+        buffer = b''
+        expected_ack_sequence = b'\x06\r\n'  # ACK CR LF
+        
         while time.time() - start_time < timeout:
             if self.serial.in_waiting > 0:
-                response = self.serial.read(1)
-                if response == ACK:
-                    return True
-                elif response == b'E':  # Start of error response
-                    # Read the rest of the error line
-                    error_line = self.serial.readline()
-                    if error_line:
-                        error_response = 'E' + error_line.decode('ascii').strip()
-                        err = ScaleError.from_response(error_response)
-                        raise ScaleException(f"Scale error: {err} ({error_response})")
-                else:
-                    raise ScaleException(f"Unexpected response: {response}")
+                # Read available data
+                new_data = self.serial.read(self.serial.in_waiting)
+                buffer += new_data
+                
+                # Check if we have the ACK sequence
+                if expected_ack_sequence in buffer:
+                    # Find position of ACK sequence
+                    ack_pos = buffer.find(expected_ack_sequence)
+                    # Check for any data before ACK
+                    if ack_pos > 0:
+                        print(f"[DEBUG] Warning: Unexpected data before ACK: {buffer[:ack_pos]}")
+                    # Remove ACK sequence and everything before it from buffer
+                    buffer = buffer[ack_pos + len(expected_ack_sequence):]
+                    # Put remaining data back in buffer
+                    if buffer:
+                        print(f"[DEBUG] Data after ACK: {buffer}")
+                        # Note: We can't put data back, so we'll just note it
+                    return (True, buffer)
+                
+                # Check for error response
+                if b'EC,' in buffer:
+                    # Parse error response
+                    try:
+                        error_str = buffer.decode('ascii', errors='ignore')
+                        if 'EC,' in error_str:
+                            lines = error_str.split('\r\n')
+                            for line in lines:
+                                if line.startswith('EC,'):
+                                    err = ScaleError.from_response(line)
+                                    raise ScaleException(f"Scale error: {err} ({line})")
+                    except UnicodeDecodeError:
+                        pass
+            
             time.sleep(0.01)  # Small delay to prevent busy waiting
         
-        return False
+        # Timeout - return the buffer we received
+        return (False, buffer)
 
     def _send_command(self, cmd: str, expect_data: bool = False) -> str:
         """
@@ -254,33 +279,45 @@ class Scale:
                 
                 if expect_ack:
                     # Wait for first ACK
-                    if not self._wait_for_ack(ACK_TIMEOUT):
+                    ack_received, received_data = self._wait_for_ack(ACK_TIMEOUT)
+                    if not ack_received:
                         if attempt < MAX_RETRIES - 1:
-                            print(f"[DEBUG] ACK timeout on attempt {attempt + 1}, retrying...")
+                            print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1}, retrying...")
+                            print(f"[DEBUG] Received serial data: {received_data}")
                             time.sleep(RETRY_DELAY)
                             continue
                         else:
+                            print(f"[DEBUG] Final failure - Received serial data: {received_data}")
                             raise ScaleAckTimeoutException(f"ACK timeout for command '{cmd}' after {MAX_RETRIES} attempts")
                     
                     # For dual ACK commands, wait for second ACK
                     if is_dual_ack:
-                        if not self._wait_for_ack(ACK_TIMEOUT):
+                        ack_received, received_data = self._wait_for_ack(ACK_TIMEOUT)
+                        if not ack_received:
                             if attempt < MAX_RETRIES - 1:
-                                print(f"[DEBUG] Second ACK timeout on attempt {attempt + 1}, retrying...")
+                                print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1} (second ACK), retrying...")
+                                print(f"[DEBUG] Received serial data: {received_data}")
                                 time.sleep(RETRY_DELAY)
                                 continue
                             else:
+                                print(f"[DEBUG] Final failure - Received serial data: {received_data}")
                                 raise ScaleAckTimeoutException(f"Second ACK timeout for dual ACK command '{cmd}' after {MAX_RETRIES} attempts")
                 
                 if expect_data:
                     # Read data response
                     data = self.serial.readline()
                     if not data:
+                        # Check if there's any data in the buffer
+                        remaining = b''
+                        if self.serial.in_waiting > 0:
+                            remaining = self.serial.read(self.serial.in_waiting)
                         if attempt < MAX_RETRIES - 1:
-                            print(f"[DEBUG] No data response on attempt {attempt + 1}, retrying...")
+                            print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1} (no data response), retrying...")
+                            print(f"[DEBUG] Received serial data: {remaining}")
                             time.sleep(RETRY_DELAY)
                             continue
                         else:
+                            print(f"[DEBUG] Final failure - Received serial data: {remaining}")
                             raise ScaleException("No data response from scale after ACK")
                     
                     decoded = data.decode('ascii').strip()
@@ -298,7 +335,7 @@ class Scale:
                 
             except (ScaleException, ScaleAckTimeoutException):
                 if attempt < MAX_RETRIES - 1:
-                    print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1}, retrying...")
+                    # Logging already done above at point of failure
                     time.sleep(RETRY_DELAY)
                     continue
                 else:
@@ -450,10 +487,20 @@ class Scale:
             unit = data[unit_start:unit_start+4]
             if unit != '  g':
                 raise ScaleUnitException(ScaleError.BAD_UNIT.desc + f" Got '{unit}' instead.")
+            
+            # Apply sign to get final weight value
+            final_value = value if sign == '+' else -value
+            
+            # Check for negative weight (possible tare issue)
+            if final_value < -1.0:
+                print(f"[DEBUG] Warning: Negative weight detected: {final_value:.4f} g (possible tare issue or container removed)")
+            
+            # Check for positive weight exceeding maximum
             if value > MAX_WEIGHT:
                 # TODO: In the future, the jubilee should respond to this exception by removing the container from the scale
                 raise ScaleMaxWeightException(ScaleError.MAX_WEIGHT.desc)
-            return value if sign == '+' else -value
+            
+            return final_value
         except ScaleException:
             raise
         except Exception as e:
