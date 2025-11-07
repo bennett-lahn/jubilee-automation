@@ -6,7 +6,7 @@ G91                          ; Relative Mode.
 G1 Z2                        ; Pop Z up slightly so we don't crash while traveling over the usable bed region.
 G90                          ; Absolute Mode.
 
-G53 G0 X40.0 Y270.0 F6000    ; Rapid to the back of the post. Stay away from the tool rack so we don't collide with tools.
+G53 G0 X40.0 Y270.0 F3000    ; Rapid to the back of the post. Stay away from the tool rack so we don't collide with tools.
                              ; This position must be chosen such that the most protruding y face of the current tool
                              ; (while on the carriage) does not collide with the most protruding y face of any parked tool.
 

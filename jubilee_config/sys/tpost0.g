@@ -9,10 +9,10 @@
 
 G90                        ; Ensure the machine is in absolute mode before issuing movements.
 
-G53 G1 X40.0 F500       ; Move to the pickup position with tool-0.
-G53 G1 Y318.0 F500
+G53 G1 X40.0 F1200       ; Move to the pickup position with tool-0.
+G53 G1 Y318.0 F1200
 M98 P"/macros/tool_lock.g" ; Lock the tool
-G53 G1 Y270.0 F500        ; Back off the tool post
+G53 G1 Y270.0 F1200        ; Back off the tool post
 
 G1 R2 Z0                   ; Restore prior Z position before tool change was initiated.
                            ; Note: tool tip position is automatically saved to slot 2 upon the start of a tool change.
