@@ -1,0 +1,716 @@
+{
+  "z_heights": {
+    "dispenser_safe": {
+      "description": "Clearance suitable for dispenser operations.",
+      "z_coordinate": "PLACEHOLDER_DISPENSER_SAFE_Z"
+    },
+    "mold_transfer_safe": {
+      "description": "Clearance for mold transfer, scale, and global readiness.",
+      "z_coordinate": "PLACEHOLDER_MOLD_TRANSFER_SAFE_Z"
+    }
+  },
+  "coordinate_tolerance": {
+    "x": 0.5,
+    "y": 0.5,
+    "z": 0.5,
+    "v": 0.5,
+    "description": "Maximum allowed deviation (in mm or degrees) from expected coordinates"
+  },
+  "positions": [
+    {
+      "id": "global_ready",
+      "type": "GLOBAL_READY",
+      "description": "Global clearance position safe for most traversals.",
+      "allows_tool_engagement": false,
+      "coordinates": {
+        "x": "PLACEHOLDER_GLOBAL_X",
+        "y": "PLACEHOLDER_GLOBAL_Y",
+        "z": "USE_Z_HEIGHT_POLICY",
+        "v": "PLACEHOLDER_GLOBAL_V"
+      },
+      "allowed_origins": [
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY",
+        "MOLD_READY"
+      ],
+      "allowed_destinations": [
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY",
+        "MOLD_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      }
+    },
+    {
+      "id": "scale_ready",
+      "type": "SCALE_READY",
+      "description": "Ready position above the scale for mold handling.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "SCALE_READY",
+        "GLOBAL_READY",
+        "MOLD_READY"
+      ],
+      "allowed_destinations": [
+        "SCALE_READY",
+        "GLOBAL_READY",
+        "MOLD_READY"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_cap",
+        "tool_pose": "safe"
+      },
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {
+          "active_tool_id": "manipulator",
+          "payload_state": "mold_without_cap"
+        },
+        "allowed_actions": [
+          "trickler_dispense"
+        ]
+      }
+    },
+    {
+      "id": "dispenser_ready_00",
+      "type": "DISPENSER_READY",
+      "description": "Ready position for dispenser station 0.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "DISPENSER_READY",
+        "GLOBAL_READY",
+        "MOLD_READY"
+      ],
+      "allowed_destinations": [
+        "DISPENSER_READY",
+        "GLOBAL_READY",
+        "MOLD_READY"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_cap"
+      },
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe"
+        ],
+        "required": "dispenser_safe"
+      },
+      "engagement": {
+        "requirements": {
+          "active_tool_id": "manipulator",
+          "payload_state": "mold_without_cap"
+        }
+      }
+    },
+    {
+      "id": "dispenser_ready_01",
+      "type": "DISPENSER_READY",
+      "description": "Ready position for dispenser station 1.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "DISPENSER_READY",
+        "GLOBAL_READY",
+        "MOLD_READY"
+      ],
+      "allowed_destinations": [
+        "DISPENSER_READY",
+        "GLOBAL_READY",
+        "MOLD_READY"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_cap"
+      },
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe"
+        ],
+        "required": "dispenser_safe"
+      },
+      "engagement": {
+        "requirements": {
+          "active_tool_id": "manipulator",
+          "payload_state": "mold_without_cap"
+        }
+      }
+    },
+    {
+      "id": "mold_ready_00",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 0.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_01",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 1.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_02",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 2.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_03",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 3.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_04",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 4.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_05",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 5.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_06",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 6.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_07",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 7.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_08",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 8.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_09",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 9.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_10",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 10.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_11",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 11.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_12",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 12.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_13",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 13.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_14",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 14.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    },
+    {
+      "id": "mold_ready_15",
+      "type": "MOLD_READY",
+      "description": "Ready position for mold slot 15.",
+      "allows_tool_engagement": true,
+      "allowed_origins": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "allowed_destinations": [
+        "MOLD_READY",
+        "GLOBAL_READY",
+        "SCALE_READY",
+        "DISPENSER_READY"
+      ],
+      "requirements": {},
+      "z_height_policy": {
+        "allowed": [
+          "dispenser_safe",
+          "mold_transfer_safe"
+        ]
+      },
+      "engagement": {
+        "requirements": {}
+      }
+    }
+  ],
+  "actions": [
+    {
+      "id": "trickler_dispense",
+      "description": "Dispense from the trickler while holding a mold without its cap at the scale.",
+      "requires_tool_engaged": true,
+      "required_tool_id": "manipulator",
+      "position_scope": [
+        "scale_ready"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_cap"
+      }
+    },
+    {
+      "id": "pick_up_mold",
+      "description": "Pick up a mold from a mold slot.",
+      "blocked_when_engaged": true,
+      "required_tool_id": "manipulator",
+      "position_scope": [
+        "mold_ready_00",
+        "mold_ready_01",
+        "mold_ready_02",
+        "mold_ready_03",
+        "mold_ready_04",
+        "mold_ready_05",
+        "mold_ready_06",
+        "mold_ready_07",
+        "mold_ready_08",
+        "mold_ready_09",
+        "mold_ready_10",
+        "mold_ready_11",
+        "mold_ready_12",
+        "mold_ready_13",
+        "mold_ready_14",
+        "mold_ready_15"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "empty"
+      }
+    },
+    {
+      "id": "put_down_mold",
+      "description": "Place a mold into a mold slot.",
+      "blocked_when_engaged": true,
+      "required_tool_id": "manipulator",
+      "position_scope": [
+        "mold_ready_00",
+        "mold_ready_01",
+        "mold_ready_02",
+        "mold_ready_03",
+        "mold_ready_04",
+        "mold_ready_05",
+        "mold_ready_06",
+        "mold_ready_07",
+        "mold_ready_08",
+        "mold_ready_09",
+        "mold_ready_10",
+        "mold_ready_11",
+        "mold_ready_12",
+        "mold_ready_13",
+        "mold_ready_14",
+        "mold_ready_15"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator"
+      },
+      "excludes": {
+        "payload_state": "empty"
+      }
+    },
+    {
+      "id": "retrieve_piston",
+      "description": "Retrieve a piston from the dispenser and insert into mold.",
+      "blocked_when_engaged": true,
+      "required_tool_id": "manipulator",
+      "position_scope": [
+        "dispenser_ready_00",
+        "dispenser_ready_01"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_piston"
+      }
+    },
+    {
+      "id": "tamp_mold",
+      "description": "Tamp the contents of a mold.",
+      "blocked_when_engaged": true,
+      "required_tool_id": "manipulator",
+      "position_scope": [
+        "mold_ready_00",
+        "mold_ready_01",
+        "mold_ready_02",
+        "mold_ready_03",
+        "mold_ready_04",
+        "mold_ready_05",
+        "mold_ready_06",
+        "mold_ready_07",
+        "mold_ready_08",
+        "mold_ready_09",
+        "mold_ready_10",
+        "mold_ready_11",
+        "mold_ready_12",
+        "mold_ready_13",
+        "mold_ready_14",
+        "mold_ready_15",
+        "scale_ready"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_cap"
+      }
+    }
+  ]
+}
