@@ -1,3 +1,4 @@
+from science_jubilee.Machine import Machine
 from science_jubilee.labware.Labware import Labware, Location, Well
 from science_jubilee.tools.Tool import (
     Tool,
@@ -5,21 +6,14 @@ from science_jubilee.tools.Tool import (
     ToolStateError,
 )
 from trickler_labware import WeightWell
+from Scale import Scale
 import PistonDispenser
 import time
 from typing import List, Optional, Dict, Any
 import json
 import os
-from config_loader import config
+from ConfigLoader import config
 from functools import wraps
-
-# Fixed tamp, claw moves mold up into tamp
-# Cap silo/hopper
-# Claw moves vertically within toolhead
-# Big and small port for trickler using rotary tube
-# rotate tamper to remove powder
-# no rotary toolhead / ignore for now ; fixed tamper
-    # For now focus on figuring out how to detect stop using motor torque/current
 
 def requires_safe_z_manipulator(func):
     """
@@ -137,8 +131,14 @@ class Manipulator(Tool):
     control tamping after contact with the material.
     """
 
-    # TODO: This is the default position of the tamper axis when moving around the platform
-    # TODO: Move global variables to different header file or something
+    # ============================================================================
+    # CONFIGURATION PARAMETERS
+    # ============================================================================
+    # NOTE: The tamper axis letter is configured via self.tamper_axis (default 'V')
+    # in __init__. Changing self.tamper_axis will update all axis references 
+    # throughout this class, including gcode commands.
+    # ============================================================================
+    
     # The tamper axis should be returned to this position after any functions that move the tamper complete
     TAMP_AXIS_TRAVEL_POS = 30 # mm
     DISPENSER_SAFE_Z = 254 # mm, z should be set to this height before moving to cap dispenser ready point or gantry will hit trickler
@@ -152,7 +152,7 @@ class Manipulator(Tool):
         self.placed_well_on_scale = False # Do not do anything except pick up well from scale if True
         
         # Tamper-specific attributes
-        self.tamper_axis = 'T'  # Default axis for tamper movement
+        self.tamper_axis = 'V'  # Default axis for tamper movement
         self.tamper_driver = 0  # Default driver number for tamper motor
         self.tamper_board_address = 0  # Default board address
         self.stall_detection_configured = False
@@ -205,9 +205,9 @@ class Manipulator(Tool):
         not_homed = [axis_names[i] for i in range(4) if not axes_homed[i]]  # Only check X, Y, Z
         if not_homed:
             print(f"Axes not homed: {', '.join(not_homed)}")
-            raise RuntimeError("X, Y, Z, and U axes must be homed before homing the tamper (T) axis.")
+            raise RuntimeError(f"X, Y, Z, and U axes must be homed before homing the tamper ({self.tamper_axis}) axis.")
         # Perform homing for tamper axis
-        machine_connection.send_command('M98 P"homet.g"')
+        machine_connection.send_command('M98 P"homev.g"')
         
         print("Homing complete. Tamper position reset to 0.0mm")
 
@@ -228,16 +228,13 @@ class Manipulator(Tool):
             raise ToolStateError("Cannot tamp, no mold on scale.")
         print(f"Tamping mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
         
-        machine._set_absolute_positioning();
-        machine.gcode("G1 T38.5 FXXX") # Pick up mold
-        machine.move(y=scale.y, s=) # Move from under trickler
-        machine.gcode("G1 T0 FXXX") # Move tamper until stall detection stops movement
-        
-        
-
+        machine._set_absolute_positioning()
+        machine.gcode(f"G1 {self.tamper_axis}38.5 F50") # Pick up mold
+        machine.move(y=scale.y, s=50) # Move from under trickler
+        machine.gcode(f"G1 {self.tamper_axis}0 F50") # Move tamper until stall detection stops movement
 
     def vibrate_tamper(self, machine_connection=None):
-        # TODO: Update when Adafruit PWM I/O arrives
+        # TODO: Update when vibration functionality added
         pass
 
     def get_status(self) -> Dict[str, Any]:
@@ -306,20 +303,19 @@ class Manipulator(Tool):
         position = machine.get_position()
         if not (position["X"] == mold.x or position["Y"] == mold.y or position["Z"] == SAFE_Z):
             raise ToolStateError("Toolhead is not correctly positioned over mold. Cannot pickup")
-        if not position["T"] == self.TAMPER_AXIS_TRAVEL_POS:
+        if not position[self.tamper_axis] == self.TAMPER_AXIS_TRAVEL_POS:
             raise ToolStateError("Tamper axis did not start in travel position")
-        # TODO: Decide feedrates for movement
         print(f"Picking up mold: {mold.name if hasattr(mold, 'name') else 'unnamed'}")
         machine._set_absolute_positioning()
-        machine.move(z=148 s=) # Move until tamper leadscrew almost grounded
+        machine.move(z=148, s=500) # Move until tamper leadscrew almost grounded
         machine._set_relative_positioning()
-        machine.move(y=-25.5, s=) # Move to the side of the mold
+        machine.move(y=-25.5, s=500) # Move to the side of the mold
         machine._set_absolute_positioning()
-        machine.gcode("G1 T50 FXXX") # Move mold holder down
+        machine.gcode(f"G1 {self.tamper_axis}50 F50") # Move mold holder down
         machine._set_relative_positioning()
-        machine.move(y=25.5, s=) # Move back under mold
+        machine.move(y=25.5, s=500) # Move back under mold
         machine._set_absolute_positioning()
-        machine.gcode("G1 T30 FXXX") # Pick up mold and move into tamper travel position
+        machine.gcode(f"G1 {self.tamper_axis}30 F50") # Pick up mold and move into tamper travel position
         machine.safe_z_movement() # Move back to safe z
         # TODO: Verify accuracy of actual vs expected mold location
         self.current_well = mold
@@ -332,20 +328,19 @@ class Manipulator(Tool):
         position = machine.get_position()
         if not (position["X"] == mold.x or position["Y"] == mold.y or position["Z"] == SAFE_Z):
             raise ToolStateError("Toolhead is not correctly positioned over mold. Cannot pickup")
-        if not position["T"] == self.TAMPER_AXIS_TRAVEL_POS:
+        if not position[self.tamper_axis] == self.TAMPER_AXIS_TRAVEL_POS:
             raise ToolStateError("Tamper axis did not start in travel position")
-        # TODO: Decide feedrates for movement
         # TODO: Verify accuracy of actual vs expected mold location
         mold_to_place = self.current_well
         self.current_well = None
         print(f"Placing mold: {mold_to_place.name if hasattr(mold_to_place, 'name') else 'unnamed'}")
         machine._set_absolute_positioning()
-        machine.move(z=148 s=) # Move until tamper leadscrew almost grounded
-        machine.gcode("G1 T50 FXXX") # Put down mold holder
+        machine.move(z=148, s=500) # Move until tamper leadscrew almost grounded
+        machine.gcode(f"G1 {self.tamper_axis}50 F50") # Put down mold holder
         machine._set_relative_positioning()
-        machine.move(y=-25.5, s=) # Move out from under mold
+        machine.move(y=-25.5, s=500) # Move out from under mold
         machine._set_absolute_positioning()
-        machine.gcode("G1 T30 FXXX") # Move into tamper travel position
+        machine.gcode(f"G1 {self.tamper_axis}30 F50") # Move into tamper travel position
         machine.safe_z_movement() # Move back to safe z
         return mold_to_place
 
@@ -368,34 +363,34 @@ class Manipulator(Tool):
         y = position['Y']
         if not y == piston_dispenser.y:
             raise ToolStateError("Y position does not match piston dispenser location.")
-        t = position['T']
-        if not t == TAMPER_AXIS_TRAVEL_POS:
+        v = position[self.tamper_axis]
+        if not v == TAMPER_AXIS_TRAVEL_POS:
             raise ToolStateError("Tamper axis did not start in travel position.")
         if not z == DISPENSER_SAFE_Z:
             raise ToolStateError("Z position did not start at dispenser safe z.")
         print(f"Placing top piston on mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
 
-        # TODO: Decide on movement feed rates
         machine._set_absolute_positioning()
-        machine.gcode("G1 T52 FXXX") # Fully lower mold
-        machine.move(z=189 s=...) # Move so mold will fit just under cap
+        machine.gcode(f"G1 {self.tamper_axis}52 F50") # Fully lower mold
+        machine.move(z=189, s=500) # Move so mold will fit just under cap
         machie._set_relative_positioning()
-        machine.move(y=35 s=...) # Move under cap dispenser so that cap drops; each piston_dispenser x/y is 35mm away from the middle point
+        machine.move(y=35, s=500) # Move under cap dispenser so that cap drops; each piston_dispenser x/y is 35mm away from the middle point
         machine._set_absolute_positioning()
-        machine.gcode("G1 T37.3 FXXX") # Move tamper to pick up cap # TODO: Not sure the tolerances line up here to actually pick up the cap
-        machine.move(x=piston_dispenser.x, y=piston_dispenser.y, s=...) # Return to start point
-        machine.gcode("G1 T{TAMPER_AXIS_TRAVEL_POS} FXXX") # Move tamper back to travel position
+        machine.gcode(f"G1 {self.tamper_axis}37.3 F50") # Move tamper to pick up cap # TODO: Not sure the tolerances line up here to actually pick up the cap
+        machine.move(x=piston_dispenser.x, y=piston_dispenser.y, s=500) # Return to start point
+        machine.gcode(f"G1 {self.tamper_axis}{self.TAMPER_AXIS_TRAVEL_POS} F50") # Move tamper back to travel position
         self.current_well.has_top_position = True
         self.current_well.has_top_piston = True
         return True
 
-    # This macro assumes that the gantry has been moved to a known location in front of and above the trickler dispenser
     @requires_safe_z_manipulator
     @requires_carrying_mold
     @requires_mold_without_piston
     def place_mold_on_scale(self, machine: Machine, scale: Scale):
         """
         Place the current mold on the scale. Only allowed if carrying a mold without a top piston.
+        WARNING: This macro assumes that the gantry has been moved to a known location in front of 
+        and above the cap dispenser.
         """
         position = machine.get_position()
         x = position['X']
@@ -407,17 +402,16 @@ class Manipulator(Tool):
         z = position['Z']
         if not z == scale.z:
             raise ToolStateError("Z position does not match scale location.")
-        t = position['T']
-        if not t == TAMPER_AXIS_TRAVEL_POS:
-            raise ToolStateError("T axis was not in travel position")
+        v = position[self.tamper_axis]
+        if not v == TAMPER_AXIS_TRAVEL_POS:
+            raise ToolStateError(f"{self.tamper_axis} axis was not in travel position")
         print(f"Placing mold on scale: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
         self.placed_well_on_scale = True
-        # TODO: Decide feedrate for moves
         machine._set_absolute_positioning() # Set absolute mode
-        machine.move_to(z=134, s=) # Move to 5mm above scale
-        machine.gcode("G1 T38.5 FXXX") # Move well so it fits under trickler
-        machine.move(y=184, s=) # Move well under trickler
-        machine.gcode("G1 T45 FXXX") # Place well on scale
+        machine.move_to(z=134, s=500) # Move to 5mm above scale
+        machine.gcode(f"G1 {self.tamper_axis}38.5 F50") # Move well so it fits under trickler
+        machine.move(y=184, s=500) # Move well under trickler
+        machine.gcode(f"G1 {self.tamper_axis}45 F50") # Place well on scale
         return True
 
     # Macro can/should only be called if a mold has been placed under the trickler 
@@ -431,10 +425,9 @@ class Manipulator(Tool):
         if not self.placed_well_on_scale:
             raise ToolStateError("Well is not on scale, cannot pick up")
         print(f"Picking mold from scale: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
-        # TODO: Decide feedrate for moves
         machine._set_absolute_positioning()
-        machine.gcode("G1 T38.5 FXXX") # Pick up mold
-        machine.move(y=scale.y, s=) # Move from under trickler
+        machine.gcode(f"G1 {self.tamper_axis}38.5 F50") # Pick up mold
+        machine.move(y=scale.y, s=500) # Move from under trickler
         machine.safe_z_movement() # Move to safe z
-        machine.gcode("G1 T{TAMP_AXIS_TRAVEL_POS} FXXX") # Move tamper back to travel position
+        machine.gcode(f"G1 {self.tamper_axis}{self.TAMP_AXIS_TRAVEL_POS} F50") # Move tamper back to travel position
         return True

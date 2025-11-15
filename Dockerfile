@@ -41,6 +41,10 @@ RUN apt-get update && apt-get install -y \
     libudev-dev \
     fcitx-libs-dev \
     git \
+    tesseract-ocr \
+    libtesseract-dev \
+    libleptonica-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables for Kivy

@@ -16,7 +16,7 @@ from Scale import Scale
 from trickler_labware import WeightWell
 from PistonDispenser import PistonDispenser
 from Manipulator import Manipulator, ToolStateError
-from config_loader import config
+from ConfigLoader import config
 from functools import wraps
 
 
@@ -91,6 +91,7 @@ class JubileeManager:
 
         # Dispenser 0 is always at x=320, y=337 and future dispensers are each offset by 42.5 mm in the x-axis
         # The stored x/y is the "ready point" 35mm in front of the dispenser
+        # TODO: Move these numbers to a config file
         num = 0
         for dispenser in self.piston_dispensers:
             dispenser.x = 320 + num*42.5
@@ -144,10 +145,20 @@ class JubileeManager:
         if not self.deck:
             return None
         
-        # Convert well_id to slot index (A1=0, A2=1, etc.)
-        row = ord(well_id[0]) - ord('A')
-        col = int(well_id[1]) - 1
-        slot_index = row * 4 + col
+        # Convert well_id to slot index
+        # Layout: Row A has 7 molds (0-6), Row B has 7 molds (7-13), Row C has 4 molds (14-17)
+        row = ord(well_id[0].upper()) - ord('A')
+        col = int(well_id[1:]) - 1
+        
+        # Calculate slot index based on row
+        if row == 0:  # Row A: slots 0-6
+            slot_index = col
+        elif row == 1:  # Row B: slots 7-13
+            slot_index = 7 + col
+        elif row == 2:  # Row C: slots 14-17
+            slot_index = 14 + col
+        else:
+            return None
         
         if str(slot_index) in self.deck.slots:
             slot = self.deck.slots[str(slot_index)]
