@@ -17,6 +17,22 @@ class WeightWell(Well):
     current_weight: float = 0.0  # Current weight in grams
     target_weight: float = 0.0   # Target weight in grams
     max_weight: float = None     # Maximum weight capacity in grams
+    ready_pos: str = None        # State machine position name (e.g., "mold_ready_A1")
+    
+    @property
+    def well_id(self) -> str:
+        """Extract well_id from ready_pos by removing 'mold_ready_' prefix.
+        
+        Returns the identifier part (e.g., 'A1' from 'mold_ready_A1').
+        If ready_pos is not set, returns the well name.
+        """
+        if self.ready_pos:
+            # Remove 'mold_ready_' prefix if present
+            if self.ready_pos.startswith('mold_ready_'):
+                return self.ready_pos.replace('mold_ready_', '', 1)
+            return self.ready_pos
+        # Fallback to name if ready_pos not set
+        return self.name
     
     def add_weight(self, weight: float):
         """Add weight to the well.

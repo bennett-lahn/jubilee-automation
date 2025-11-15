@@ -1,5 +1,9 @@
 kivy>=2.0.0
 pyserial>=3.5
 numpy>=1.21.0
-science-jubilee
+science-jubilee 
+tesserocr
+opencv-python
+pillow
+matplotlib>=3.5.0
 python-statemachine>=2.1.0 

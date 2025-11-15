@@ -1,5 +1,3 @@
-from science_jubilee.Machine import Machine
-from science_jubilee.labware.Labware import Labware, Location, Well
 from science_jubilee.tools.Tool import (
     Tool,
     ToolConfigurationError,
@@ -144,10 +142,10 @@ class Manipulator(Tool):
     DISPENSER_SAFE_Z = 254 # mm, z should be set to this height before moving to cap dispenser ready point or gantry will hit trickler
     SAFE_Z = 195 # mm
 
-    def __init__(self, index, name, machine=None, config=None):
+    def __init__(self, index, name, state_machine=None, config=None):
         super().__init__(index, name)
         self.current_well = None  # WeightWell object representing the current mold
-        self.machine = machine # Attached jubilee machine object
+        self.state_machine = state_machine  # Reference to MotionPlatformStateMachine
         self.config = config
         self.placed_well_on_scale = False # Do not do anything except pick up well from scale if True
         
@@ -189,49 +187,72 @@ class Manipulator(Tool):
         self.tamper_board_address = movement_config.get('board_address', self.tamper_board_address)
         self.tamper_speed = movement_config.get('speed', self.tamper_speed)
         self.tamper_acceleration = movement_config.get('acceleration', self.tamper_acceleration)
+    
+    def _get_config_dict(self) -> Dict[str, Any]:
+        """Helper to package manipulator state for state machine calls."""
+        return {
+            'current_well': self.current_well,
+            'tamper_axis': self.tamper_axis,
+            'tamper_travel_pos': self.TAMP_AXIS_TRAVEL_POS,
+            'safe_z': self.SAFE_Z,
+            'dispenser_safe_z': self.DISPENSER_SAFE_Z,
+            'placed_well_on_scale': self.placed_well_on_scale,
+        }
+    
+    @property
+    def machine(self):
+        """Access to machine through state machine for read-only queries."""
+        if self.state_machine:
+            return self.state_machine.machine
+        return None
 
     def home_tamper(self, machine_connection=None):
         """
         Perform sensorless homing for the tamper axis.
         
-        Args:
-            machine_connection: Connection to the Jubilee machine for sending commands
-        """
-        if not self.machine_connection:
-            raise RuntimeError("Machine connection not available for tamper homing.")
-            
-        axes_homed = getattr(machine_connection, 'axes_homed', [False, False, False, False])
-        axis_names = ['X', 'Y', 'Z', 'U']
-        not_homed = [axis_names[i] for i in range(4) if not axes_homed[i]]  # Only check X, Y, Z
-        if not_homed:
-            print(f"Axes not homed: {', '.join(not_homed)}")
-            raise RuntimeError(f"X, Y, Z, and U axes must be homed before homing the tamper ({self.tamper_axis}) axis.")
-        # Perform homing for tamper axis
-        machine_connection.send_command('M98 P"homev.g"')
+        Validates and executes through MotionPlatformStateMachine.
         
-        print("Homing complete. Tamper position reset to 0.0mm")
+        Args:
+            machine_connection: Deprecated parameter (for backward compatibility)
+        """
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        # Validate and execute through state machine
+        result = self.state_machine.validated_home_tamper(
+            tamper_axis=self.tamper_axis
+        )
+        
+        if not result.valid:
+            raise RuntimeError(f"Tamper homing failed: {result.reason}")
 
     # TODO: Figure out how to merge stall detection with this function so that we can handle stall detection gracefully
     @requires_carrying_mold
     @requires_mold_without_piston
-    @requires_machine_connection
-    def tamp(self, target_depth: float = None, machine_connection=None):
+    def tamp(self, scale: Scale, target_depth: float = None):
         """
         Perform tamping action. Only allowed if carrying a mold without a cap.
-        Enhanced version with stall detection.
         
         Args:
+            scale: The Scale instance with position information
             target_depth: Target depth to tamp to (mm). If None, uses default depth.
-            machine_connection: Connection to the Jubilee machine for sending commands
         """
-        if not self.current_well.placed_well_on_scale:
-            raise ToolStateError("Cannot tamp, no mold on scale.")
-        print(f"Tamping mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
         
-        machine._set_absolute_positioning()
-        machine.gcode(f"G1 {self.tamper_axis}38.5 F50") # Pick up mold
-        machine.move(y=scale.y, s=50) # Move from under trickler
-        machine.gcode(f"G1 {self.tamper_axis}0 F50") # Move tamper until stall detection stops movement
+        if not self.placed_well_on_scale:
+            raise ToolStateError("Cannot tamp, no mold on scale.")
+        
+        # Call state machine method which validates and executes
+        result = self.state_machine.validated_tamp(
+            scale=scale,
+            manipulator_config=self._get_config_dict()
+        )
+        
+        if not result.valid:
+            raise ToolStateError(f"Cannot tamp: {result.reason}")
+        
+        return True
 
     def vibrate_tamper(self, machine_connection=None):
         # TODO: Update when vibration functionality added
@@ -290,144 +311,117 @@ class Manipulator(Tool):
         """
         return self.current_well is not None
 
-    # Assumes toolhead is directly above the chosen well at safe_z height with tamper axis in travel position
-    @requires_safe_z_manipulator
-    @requires_not_carrying_mold
-    @requires_valid_mold
-    def pick_from_well(self, mold: WeightWell):
-        """Pick up mold from well. """
-        if mold.has_top_piston:
-            raise ToolStateError("Mold to be picked up already has a top piston.")
-        if self.placed_well_on_scale:
-            raise ToolStateError("Cannot pick up mold, mold currently on scale.")
-        position = machine.get_position()
-        if not (position["X"] == mold.x or position["Y"] == mold.y or position["Z"] == SAFE_Z):
-            raise ToolStateError("Toolhead is not correctly positioned over mold. Cannot pickup")
-        if not position[self.tamper_axis] == self.TAMPER_AXIS_TRAVEL_POS:
-            raise ToolStateError("Tamper axis did not start in travel position")
-        print(f"Picking up mold: {mold.name if hasattr(mold, 'name') else 'unnamed'}")
-        machine._set_absolute_positioning()
-        machine.move(z=148, s=500) # Move until tamper leadscrew almost grounded
-        machine._set_relative_positioning()
-        machine.move(y=-25.5, s=500) # Move to the side of the mold
-        machine._set_absolute_positioning()
-        machine.gcode(f"G1 {self.tamper_axis}50 F50") # Move mold holder down
-        machine._set_relative_positioning()
-        machine.move(y=25.5, s=500) # Move back under mold
-        machine._set_absolute_positioning()
-        machine.gcode(f"G1 {self.tamper_axis}30 F50") # Pick up mold and move into tamper travel position
-        machine.safe_z_movement() # Move back to safe z
-        # TODO: Verify accuracy of actual vs expected mold location
+    def pick_mold(self, mold: WeightWell):
+        """
+        Pick up mold from well.
+        
+        Assumes toolhead is directly above the well at safe_z height with tamper axis in travel position.
+        Validates move through state machine before execution.
+        """
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        # Call state machine method which validates and executes
+        result = self.state_machine.validated_pick_mold_from_well(
+            mold=mold,
+            manipulator_config=self._get_config_dict()
+        )
+        
+        if not result.valid:
+            raise ToolStateError(f"Cannot pick mold: {result.reason}")
+        
+        # Update local state after successful execution
         self.current_well = mold
 
-    @requires_carrying_mold
-    def place_in_well(self) -> WeightWell:
-        """Place down the current mold and return it."""
-        if self.placed_well_on_scale:
-            raise ToolStateError("Cannot pick up mold, mold currently on scale.")
-        position = machine.get_position()
-        if not (position["X"] == mold.x or position["Y"] == mold.y or position["Z"] == SAFE_Z):
-            raise ToolStateError("Toolhead is not correctly positioned over mold. Cannot pickup")
-        if not position[self.tamper_axis] == self.TAMPER_AXIS_TRAVEL_POS:
-            raise ToolStateError("Tamper axis did not start in travel position")
-        # TODO: Verify accuracy of actual vs expected mold location
+    def place_well(self) -> WeightWell:
+        """
+        Place down the current mold and return it.
+        
+        Assumes toolhead is directly above the well at safe_z height with tamper axis in travel position.
+        Validates move through state machine before execution.
+        """
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
         mold_to_place = self.current_well
+        
+        # Call state machine method which validates and executes
+        result = self.state_machine.validated_place_mold_in_well(
+            manipulator_config=self._get_config_dict()
+        )
+        
+        if not result.valid:
+            raise ToolStateError(f"Cannot place mold: {result.reason}")
+        
+        # Update local state after successful execution
         self.current_well = None
-        print(f"Placing mold: {mold_to_place.name if hasattr(mold_to_place, 'name') else 'unnamed'}")
-        machine._set_absolute_positioning()
-        machine.move(z=148, s=500) # Move until tamper leadscrew almost grounded
-        machine.gcode(f"G1 {self.tamper_axis}50 F50") # Put down mold holder
-        machine._set_relative_positioning()
-        machine.move(y=-25.5, s=500) # Move out from under mold
-        machine._set_absolute_positioning()
-        machine.gcode(f"G1 {self.tamper_axis}30 F50") # Move into tamper travel position
-        machine.safe_z_movement() # Move back to safe z
         return mold_to_place
 
-    @requires_carrying_mold
-    @requires_mold_without_piston
-    def place_top_piston(self, machine: Machine, piston_dispenser: PistonDispenser):
+    def place_top_piston(self, piston_dispenser: PistonDispenser):
         """
         Place the top piston on the current mold. Only allowed if carrying a mold without a top piston.
+        
+        Assumes toolhead is at dispenser position.
+        Validates move through state machine before execution.
         """
-
-        if piston_dispenser.num_pistons == 0:
-            raise ToolStateError("No pistons in dispenser.")
-        if self.placed_well_on_scale:
-            raise ToolStateError("Cannot add top piston, mold on scale.")
-
-        position = machine.get_position()
-        x = position['X']
-        if not x == piston_dispenser.x:
-            raise ToolStateError("X position does not match piston dispenser location.")
-        y = position['Y']
-        if not y == piston_dispenser.y:
-            raise ToolStateError("Y position does not match piston dispenser location.")
-        v = position[self.tamper_axis]
-        if not v == TAMPER_AXIS_TRAVEL_POS:
-            raise ToolStateError("Tamper axis did not start in travel position.")
-        if not z == DISPENSER_SAFE_Z:
-            raise ToolStateError("Z position did not start at dispenser safe z.")
-        print(f"Placing top piston on mold: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
-
-        machine._set_absolute_positioning()
-        machine.gcode(f"G1 {self.tamper_axis}52 F50") # Fully lower mold
-        machine.move(z=189, s=500) # Move so mold will fit just under cap
-        machie._set_relative_positioning()
-        machine.move(y=35, s=500) # Move under cap dispenser so that cap drops; each piston_dispenser x/y is 35mm away from the middle point
-        machine._set_absolute_positioning()
-        machine.gcode(f"G1 {self.tamper_axis}37.3 F50") # Move tamper to pick up cap # TODO: Not sure the tolerances line up here to actually pick up the cap
-        machine.move(x=piston_dispenser.x, y=piston_dispenser.y, s=500) # Return to start point
-        machine.gcode(f"G1 {self.tamper_axis}{self.TAMPER_AXIS_TRAVEL_POS} F50") # Move tamper back to travel position
-        self.current_well.has_top_position = True
-        self.current_well.has_top_piston = True
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        # Call state machine method which validates and executes
+        result = self.state_machine.validated_place_top_piston(
+            piston_dispenser=piston_dispenser,
+            manipulator_config=self._get_config_dict()
+        )
+        
+        if not result.valid:
+            raise ToolStateError(f"Cannot place top piston: {result.reason}")
+        
+        # Update local state after successful execution
+        if self.current_well:
+            self.current_well.has_top_piston = True
+        
         return True
 
-    @requires_safe_z_manipulator
-    @requires_carrying_mold
-    @requires_mold_without_piston
-    def place_mold_on_scale(self, machine: Machine, scale: Scale):
+    def place_well_on_scale(self, scale: Scale):
         """
         Place the current mold on the scale. Only allowed if carrying a mold without a top piston.
-        WARNING: This macro assumes that the gantry has been moved to a known location in front of 
-        and above the cap dispenser.
+        
+        Validates move through state machine before execution.
         """
-        position = machine.get_position()
-        x = position['X']
-        if not x == scale.x:
-            raise ToolStateError("X position does not match scale location.")
-        y = position['Y']
-        if not y == scale.y:
-            raise ToolStateError("Y position does not match scale location.")
-        z = position['Z']
-        if not z == scale.z:
-            raise ToolStateError("Z position does not match scale location.")
-        v = position[self.tamper_axis]
-        if not v == TAMPER_AXIS_TRAVEL_POS:
-            raise ToolStateError(f"{self.tamper_axis} axis was not in travel position")
-        print(f"Placing mold on scale: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        # Call state machine method which validates and executes
+        result = self.state_machine.validated_place_mold_on_scale(
+            scale=scale,
+            manipulator_config=self._get_config_dict()
+        )
+        
+        if not result.valid:
+            raise ToolStateError(f"Cannot place mold on scale: {result.reason}")
+        
+        # Update local state after successful execution
         self.placed_well_on_scale = True
-        machine._set_absolute_positioning() # Set absolute mode
-        machine.move_to(z=134, s=500) # Move to 5mm above scale
-        machine.gcode(f"G1 {self.tamper_axis}38.5 F50") # Move well so it fits under trickler
-        machine.move(y=184, s=500) # Move well under trickler
-        machine.gcode(f"G1 {self.tamper_axis}45 F50") # Place well on scale
         return True
 
-    # Macro can/should only be called if a mold has been placed under the trickler 
-    @requires_safe_z_manipulator
-    @requires_carrying_mold
-    @requires_mold_without_piston
-    def pick_mold_from_scale(self, machine: Machine, scale: Scale):
+    def pick_well_from_scale(self, scale: Scale):
         """
         Pick up the current mold from the scale. Only allowed if carrying a mold without a top piston.
+        
+        Validates move through state machine before execution.
         """
-        if not self.placed_well_on_scale:
-            raise ToolStateError("Well is not on scale, cannot pick up")
-        print(f"Picking mold from scale: {self.current_well.name if hasattr(self.current_well, 'name') else 'unnamed'}")
-        machine._set_absolute_positioning()
-        machine.gcode(f"G1 {self.tamper_axis}38.5 F50") # Pick up mold
-        machine.move(y=scale.y, s=500) # Move from under trickler
-        machine.safe_z_movement() # Move to safe z
-        machine.gcode(f"G1 {self.tamper_axis}{self.TAMP_AXIS_TRAVEL_POS} F50") # Move tamper back to travel position
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        # Call state machine method which validates and executes
+        result = self.state_machine.validated_pick_mold_from_scale(
+            scale=scale,
+            manipulator_config=self._get_config_dict()
+        )
+        
+        if not result.valid:
+            raise ToolStateError(f"Cannot pick mold from scale: {result.reason}")
+        
+        # Update local state after successful execution
+        self.placed_well_on_scale = False
         return True

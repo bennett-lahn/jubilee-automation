@@ -85,7 +85,7 @@
       }
     },
     {
-      "id": "dispenser_ready_00",
+      "id": "dispenser_ready_0",
       "type": "DISPENSER_READY",
       "description": "Ready position for dispenser station 0.",
       "allows_tool_engagement": true,
@@ -117,7 +117,7 @@
       }
     },
     {
-      "id": "dispenser_ready_01",
+      "id": "dispenser_ready_1",
       "type": "DISPENSER_READY",
       "description": "Ready position for dispenser station 1.",
       "allows_tool_engagement": true,
@@ -149,7 +149,7 @@
       }
     },
     {
-      "id": "mold_ready_00",
+      "id": "mold_ready_0",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 0.",
       "allows_tool_engagement": true,
@@ -177,7 +177,7 @@
       }
     },
     {
-      "id": "mold_ready_01",
+      "id": "mold_ready_1",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 1.",
       "allows_tool_engagement": true,
@@ -205,7 +205,7 @@
       }
     },
     {
-      "id": "mold_ready_02",
+      "id": "mold_ready_2",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 2.",
       "allows_tool_engagement": true,
@@ -233,7 +233,7 @@
       }
     },
     {
-      "id": "mold_ready_03",
+      "id": "mold_ready_3",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 3.",
       "allows_tool_engagement": true,
@@ -261,7 +261,7 @@
       }
     },
     {
-      "id": "mold_ready_04",
+      "id": "mold_ready_4",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 4.",
       "allows_tool_engagement": true,
@@ -289,7 +289,7 @@
       }
     },
     {
-      "id": "mold_ready_05",
+      "id": "mold_ready_5",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 5.",
       "allows_tool_engagement": true,
@@ -317,7 +317,7 @@
       }
     },
     {
-      "id": "mold_ready_06",
+      "id": "mold_ready_6",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 6.",
       "allows_tool_engagement": true,
@@ -345,7 +345,7 @@
       }
     },
     {
-      "id": "mold_ready_07",
+      "id": "mold_ready_7",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 7.",
       "allows_tool_engagement": true,
@@ -373,7 +373,7 @@
       }
     },
     {
-      "id": "mold_ready_08",
+      "id": "mold_ready_8",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 8.",
       "allows_tool_engagement": true,
@@ -401,7 +401,7 @@
       }
     },
     {
-      "id": "mold_ready_09",
+      "id": "mold_ready_9",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 9.",
       "allows_tool_engagement": true,
@@ -617,16 +617,16 @@
       "blocked_when_engaged": true,
       "required_tool_id": "manipulator",
       "position_scope": [
-        "mold_ready_00",
-        "mold_ready_01",
-        "mold_ready_02",
-        "mold_ready_03",
-        "mold_ready_04",
-        "mold_ready_05",
-        "mold_ready_06",
-        "mold_ready_07",
-        "mold_ready_08",
-        "mold_ready_09",
+        "mold_ready_0",
+        "mold_ready_1",
+        "mold_ready_2",
+        "mold_ready_3",
+        "mold_ready_4",
+        "mold_ready_5",
+        "mold_ready_6",
+        "mold_ready_7",
+        "mold_ready_8",
+        "mold_ready_9",
         "mold_ready_10",
         "mold_ready_11",
         "mold_ready_12",
@@ -645,16 +645,16 @@
       "blocked_when_engaged": true,
       "required_tool_id": "manipulator",
       "position_scope": [
-        "mold_ready_00",
-        "mold_ready_01",
-        "mold_ready_02",
-        "mold_ready_03",
-        "mold_ready_04",
-        "mold_ready_05",
-        "mold_ready_06",
-        "mold_ready_07",
-        "mold_ready_08",
-        "mold_ready_09",
+        "mold_ready_0",
+        "mold_ready_1",
+        "mold_ready_2",
+        "mold_ready_3",
+        "mold_ready_4",
+        "mold_ready_5",
+        "mold_ready_6",
+        "mold_ready_7",
+        "mold_ready_8",
+        "mold_ready_9",
         "mold_ready_10",
         "mold_ready_11",
         "mold_ready_12",
@@ -671,16 +671,16 @@
     },
     {
       "id": "retrieve_piston",
-      "description": "Retrieve a piston from the dispenser and insert into mold.",
+      "description": "Retrieve a piston from the dispenser and insert into mold. Requires manipulator tool, mold without cap, and must start from the corresponding dispenser ready position.",
       "blocked_when_engaged": true,
       "required_tool_id": "manipulator",
       "position_scope": [
-        "dispenser_ready_00",
-        "dispenser_ready_01"
+        "dispenser_ready_0",
+        "dispenser_ready_1"
       ],
       "requirements": {
         "active_tool_id": "manipulator",
-        "payload_state": "mold_without_piston"
+        "payload_state": "mold_without_cap"
       }
     },
     {
@@ -689,16 +689,16 @@
       "blocked_when_engaged": true,
       "required_tool_id": "manipulator",
       "position_scope": [
-        "mold_ready_00",
-        "mold_ready_01",
-        "mold_ready_02",
-        "mold_ready_03",
-        "mold_ready_04",
-        "mold_ready_05",
-        "mold_ready_06",
-        "mold_ready_07",
-        "mold_ready_08",
-        "mold_ready_09",
+        "mold_ready_0",
+        "mold_ready_1",
+        "mold_ready_2",
+        "mold_ready_3",
+        "mold_ready_4",
+        "mold_ready_5",
+        "mold_ready_6",
+        "mold_ready_7",
+        "mold_ready_8",
+        "mold_ready_9",
         "mold_ready_10",
         "mold_ready_11",
         "mold_ready_12",
@@ -710,6 +710,64 @@
       "requirements": {
         "active_tool_id": "manipulator",
         "payload_state": "mold_without_cap"
+      }
+    },
+    {
+      "id": "home_all",
+      "description": "Home all axes (X, Y, Z, U). Can be conducted from any position, but requires no tool picked up and no mold. Returns machine to global_ready position.",
+      "blocked_when_engaged": true,
+      "position_scope": [],
+      "requirements": {
+        "payload_state": "empty"
+      },
+      "excludes": {
+        "active_tool_id": "manipulator"
+      }
+    },
+    {
+      "id": "home_manipulator",
+      "description": "Home the manipulator axis (V). Requires no mold picked up.",
+      "blocked_when_engaged": true,
+      "position_scope": [],
+      "requirements": {
+        "payload_state": "empty"
+      }
+    },
+    {
+      "id": "home_trickler",
+      "description": "Home the trickler axis (W). Can be homed at any time with no requirements.",
+      "blocked_when_engaged": false,
+      "position_scope": [],
+      "requirements": {}
+    },
+    {
+      "id": "pickup_tool",
+      "description": "Pick up the manipulator tool and return to global_ready position. Valid from mold_ready or global_ready positions. Requires no tool already picked up and mold_transfer_safe z_height.",
+      "blocked_when_engaged": true,
+      "position_scope": [
+        "GLOBAL_READY",
+        "MOLD_READY"
+      ],
+      "requirements": {
+        "payload_state": "empty",
+        "z_height_id": "mold_transfer_safe"
+      },
+      "excludes": {
+        "active_tool_id": "manipulator"
+      }
+    },
+    {
+      "id": "park_tool",
+      "description": "Park the manipulator tool and return to global_ready position. Valid from global_ready position. Requires manipulator tool to be active.",
+      "blocked_when_engaged": true,
+      "required_tool_id": "manipulator",
+      "position_scope": [
+        "GLOBAL_READY",
+        "MOLD_READY"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "empty"
       }
     }
   ]
