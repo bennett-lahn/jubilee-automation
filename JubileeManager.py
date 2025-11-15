@@ -4,9 +4,13 @@ JubileeManager - Centralized management of Jubilee machine and related component
 This module provides the JubileeManager class for coordinating complex tasks
 that require interacting with the instantiated Jubilee machine as well as other
 components like trickler or toolhead to perform complex tasks like weighing containers.
+
+The JubileeManager uses a MotionPlatformStateMachine to validate and execute all
+movements, ensuring that operations cannot bypass safety checks.
 """
 
 from typing import Optional, List
+from pathlib import Path
 
 # Import Jubilee components
 from science_jubilee.Machine import Machine
@@ -16,76 +20,24 @@ from Scale import Scale
 from trickler_labware import WeightWell
 from PistonDispenser import PistonDispenser
 from Manipulator import Manipulator, ToolStateError
+from MotionPlatformStateMachine import MotionPlatformStateMachine
 from ConfigLoader import config
 from functools import wraps
 
-
-def requires_safe_z_machine(func):
-    """
-    Decorator for JubileeManager methods that require safe Z height.
-    Assumes the decorated method belongs to a class with:
-    - self.machine (Machine object)
-    - self.deck (Deck object)
-    """
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        if not self.machine or not self.connected:
-            raise RuntimeError("Machine not connected")
-        
-        # Get current Z position
-        current_z = float(self.machine.get_position()["Z"])
-        
-        # Get safe Z height
-        if self.deck:
-            safe_z = self.deck.safe_z
-        else:
-            safe_z = config.get_safe_z()
-        
-        # Move to safe height if needed
-        if current_z < safe_z:
-            safe_height = safe_z + config.get_safe_z_offset()
-            self.machine.move_to(z=safe_height)
-        
-        return func(self, *args, **kwargs)
-    
-    return wrapper
-
-def requires_well_validation(func):
-    """
-    Decorator for methods that require a valid well.
-    Assumes the decorated method has a 'well' parameter or 'well_id' parameter.
-    """
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        # Check if well_id is in kwargs or args
-        well_id = kwargs.get('well_id')
-        if not well_id and args:
-            # Assume first argument after self is well_id
-            well_id = args[0]
-        
-        if well_id:
-            # For JubileeManager, validate well exists in deck
-            if hasattr(self, 'deck') and self.deck:
-                well = self._get_well_from_deck(well_id)
-                if not well or not well.valid:
-                    raise ValueError(f"Well {well_id} is not valid or not found")
-        
-        return func(self, *args, **kwargs)
-    
-    return wrapper
-
 class JubileeManager:
-    """Manages the Jubilee machine and related components"""
+    """
+    Manages the Jubilee machine and related components.
+    
+    All movements are validated through the MotionPlatformStateMachine, which is owned
+    by this manager and cannot be bypassed.
+    """
     
     # TODO: make dispensers configurable from UI
     def __init__(self, num_piston_dispensers: int = 0, num_pistons_per_dispenser: int = 0):
-        self.machine: Optional[Machine] = None
         self.scale: Optional[Scale] = None
-        self.scale.x = ... # TODO: Set these to known good location to start manipulator macros
-        self.scale.y = ...
-        self.scale.z = ...
         self.trickler: Optional[Trickler] = None
         self.manipulator: Optional[Manipulator] = None
+        self.state_machine: Optional[MotionPlatformStateMachine] = None
         self.connected = False
         self.piston_dispensers: List[PistonDispenser] = [PistonDispenser(i, num_pistons_per_dispenser) for i in range(num_piston_dispensers)]
 
@@ -102,6 +54,16 @@ class JubileeManager:
         self.deck: Optional[Deck] = None
         self._initialize_deck()
     
+    @property
+    def machine_read_only(self) -> Optional[Machine]:
+        """
+        Access to machine through state machine.
+        This should ONLY be used
+        """
+        if self.state_machine:
+            return self.state_machine.machine
+        return None
+    
     def _initialize_deck(self):
         """Initialize the deck with weight wells in each slot"""
         try:
@@ -116,6 +78,10 @@ class JubileeManager:
                 
                 # Convert the labware wells to WeightWell objects
                 for well_name, well in labware.wells.items():
+                    # Create state machine position name from well name
+                    # well_name is typically like "A1", "B3", etc.
+                    ready_pos = f"mold_ready_{well_name}"
+                    
                     # Create a WeightWell with only required fields and defaults for custom parameters
                     weight_well = WeightWell(
                         name=well_name,  # name
@@ -130,7 +96,8 @@ class JubileeManager:
                         has_top_piston=False,
                         current_weight=0.0,
                         target_weight=0.0,
-                        max_weight=None
+                        max_weight=None,
+                        ready_pos=ready_pos  # State machine position name
                     )
                     
                     # Replace the regular well with our WeightWell
@@ -169,39 +136,85 @@ class JubileeManager:
                         return well
         return None
         
-    def connect(self, machine_address: str = None, scale_port: str = "/dev/ttyUSB0"):
-        """Connect to Jubilee machine and scale"""
+    def connect(
+        self,
+        machine_address: str = None,
+        scale_port: str = "/dev/ttyUSB0",
+        state_machine_config: str = "./jubilee_api_config/motion_platform_positions.json"
+    ):
+        """
+        Connect to Jubilee machine, scale, and initialize the state machine.
+        
+        Args:
+            machine_address: IP address of the Jubilee machine (uses config if None)
+            scale_port: Serial port for the scale connection
+            state_machine_config: Path to state machine configuration file
+        """
         try:
             # Use config IP if no address provided
             if machine_address is None:
                 machine_address = config.get_duet_ip()
             
             # Connect to machine
-            self.machine = Machine(address=machine_address)
-            self.machine.connect()
+            real_machine = Machine(address=machine_address)
+            real_machine.connect()
+            
+            # Initialize the state machine with the real machine
+            # The state machine owns the machine and controls all access to it
+            config_path = Path(state_machine_config)
+            if not config_path.exists():
+                raise FileNotFoundError(f"State machine config not found: {state_machine_config}")
+            
+            self.state_machine = MotionPlatformStateMachine.from_config_file(
+                config_path,
+                real_machine
+            )
             
             # Connect to scale
             self.scale = Scale(port=scale_port)
             self.scale.connect()
 
-            self.manipulator = Manipulator(index=0, name="manipulator", config="manipulator_config", scale=self.scale)
+            # Create manipulator with state machine reference
+            self.manipulator = Manipulator(
+                index=0,
+                name="manipulator",
+                state_machine=self.state_machine,
+                config="manipulator_config"
+            )
 
             # Initialize trickler (assuming it's already loaded)
             # This would need to be configured based on your setup
             # self.trickler = Trickler(index=0, name="trickler", config="trickler_config", scale=self.scale)
             
+            # Ensure state machine context is set correctly for homing
+            self.state_machine.update_context(
+                active_tool_id=None,
+                payload_state="empty"
+            )
+            
+            # Home all axes (X, Y, Z, U) through state machine
+            # This requires no tool picked up and no mold
+            # Returns to global_ready position
+            result = self.state_machine.validated_home_all()
+            if not result.valid:
+                raise RuntimeError(f"Failed to home all axes: {result.reason}")
+            
+            # Load the manipulator tool (this registers it but doesn't pick it up)
+            self.machine_read_only.load(self.manipulator)
+            
+            # Pick up the tool through state machine
+            # This validates we're at a valid position, picks up the tool, and moves to global_ready
+            result = self.state_machine.validated_pickup_tool(self.manipulator)
+            if not result.valid:
+                raise RuntimeError(f"Failed to pick up tool: {result.reason}")
+            
+            # Home the manipulator axis (V) through state machine
+            # This requires no mold picked up
+            result = self.state_machine.validated_home_manipulator(manipulator_axis='V')
+            if not result.valid:
+                raise RuntimeError(f"Failed to home manipulator: {result.reason}")
+            
             self.connected = True
-
-            # Now get ready for dispensing by homing all axes, picking up tool, etc.
-
-            self.machine.load(self.manipulator)
-
-            self.machine.home_xyu()
-            self.machine.home_z()
-            # TODO: Update this to control machine moves to/from a safe location so that dispenser or trickler collisions don't occur
-            self.machine.pickup_tool(self.manipulator)
-            self.manipulator.home_tamper(self.machine)
-
             return True
             
         except Exception as e:
@@ -211,8 +224,8 @@ class JubileeManager:
     
     def disconnect(self):
         """Disconnect from all components"""
-        if self.machine:
-            self.machine.disconnect()
+        if self.machine_read_only:
+            self.machine_read_only.disconnect()
         if self.scale:
             self.scale.disconnect()
         self.connected = False
@@ -226,8 +239,6 @@ class JubileeManager:
                 return 0.0
         return 0.0
     
-    @requires_safe_z_machine
-    @requires_well_validation
     def dispense_to_well(self, well_id: str, target_weight: float) -> bool:
         """Dispense powder to a specific well"""
         if not self.connected or not self.trickler:
@@ -247,16 +258,17 @@ class JubileeManager:
                 raise ToolStateError(f"Well {well_id} not found in deck.")
             if not well.valid:
                 raise ToolStateError("Well is not valid.")
+            # TODO: Move this check to state machine?
             if well.has_top_piston:
                 raise ToolStateError("Well already has a top piston. Cannot dispense.")
             
-            # TODO: Implement movement to well location
+            # TODO: Move this logic to state machine / movement executor
             self._move_to_well(well_id)
             self.manipulator.pick_mold(well)
             self._move_to_scale()
-            self.manipulator.place_well_on_scale(self.machine, self.scale)
+            self.manipulator.place_well_on_scale(self.scale)
             self._dispense_powder(target_weight)
-            self.manipulator.pick_well_from_scale(self.machine, self.scale)
+            self.manipulator.pick_well_from_scale(self.scale)
             dispenser_index = -1
             for dispenser in self.piston_dispensers:
                 if dispenser.num_pistons > 0:
@@ -272,71 +284,120 @@ class JubileeManager:
             print(f"Dispensing error: {e}")
             return False
 
-    @requires_safe_z_machine
     def get_piston_from_dispenser(self, dispenser_index: int, well_id: str):
-        """Get the top piston from a specific dispenser"""
+        """
+        Get the top piston from a specific dispenser.
+        
+        Validates and executes through MotionPlatformStateMachine.
+        Requires being at the dispenser ready position for that dispenser.
+        """
         if not self.connected or not self.piston_dispensers:
             return False
+        
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
         if self.manipulator.current_well is None:
             raise ToolStateError("No mold to place piston into.")
         
         try:
-            x = self.piston_dispensers[dispenser_index].x
-            y = self.piston_dispensers[dispenser_index].y
-
-            self.machine.move(z=config.get_safe_z())  # Use safe Z height from config
-            self.machine.move_to(x=x, y=y)
-            self.manipulator.place_top_piston(self.machine, self.piston_dispensers[dispenser_index])
+            piston_dispenser = self.piston_dispensers[dispenser_index]
+            
+            # Move to dispenser ready position if not already there
+            target_position = f"dispenser_ready_{dispenser_index}"
+            if self.state_machine.context.position_id != target_position:
+                # Move to dispenser position through state machine
+                result = self.state_machine.validated_move_to_dispenser(
+                    dispenser_index=dispenser_index,
+                    dispenser_x=piston_dispenser.x,
+                    dispenser_y=piston_dispenser.y
+                )
+                if not result.valid:
+                    raise RuntimeError(f"Failed to move to dispenser position: {result.reason}")
+            
+            # Retrieve piston through state machine
+            result = self.state_machine.validated_retrieve_piston(
+                piston_dispenser=piston_dispenser,
+                manipulator_config=self.manipulator._get_config_dict()
+            )
+            
+            if not result.valid:
+                raise RuntimeError(f"Failed to retrieve piston: {result.reason}")
+            
+            # Update state after successful retrieval
             self.piston_dispensers[dispenser_index].remove_piston()
-            # Get the well from deck and set piston
             well = self._get_well_from_deck(well_id)
             if well:
-                well.set_piston(True)
+                well.has_top_piston = True
+            
             return True
         except Exception as e:
             print(f"Getting piston from dispenser error: {e}")
             return False
 
-    @requires_safe_z_machine
-    @requires_well_validation
     def _move_to_well(self, well_id: str):
-        """Move to a specific well"""
-        if not self.connected or not self.deck:
-            return False
+        """
+        Move to a specific well.
         
-        try:
-            well = self._get_well_from_deck(well_id)
-            if not well or not well.valid:
-                raise ToolStateError("Well is not valid.")
-            self.machine.safe_z_movement()
-            self.machine.move_to(x=well.x, y=well.y)
-            return True
-        except Exception as e:
-            print(f"Error moving to well: {e}")
-            return False
+        Validates and executes through MotionPlatformStateMachine.
+        Uses the well's ready_pos field to determine the state machine position.
+        """
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        # Get the well to access its ready_pos
+        well = self._get_well_from_deck(well_id)
+        
+        result = self.state_machine.validated_move_to_well(
+            well_id=well_id,
+            deck=self.deck,
+            scale=self.scale,
+            well=well  # Pass well object so validated_move_to_well can use ready_pos
+        )
+        
+        if not result.valid:
+            raise RuntimeError(f"Move to well failed: {result.reason}")
+        
+        return True
 
     def _move_to_scale(self):
-        """Move to the scale"""
-        if not self.connected or not self.scale:
+        """
+        Move to the scale.
+        
+        Validates and executes through MotionPlatformStateMachine.
+        """
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        if not self.scale:
             return False
         
-        try:
-            self.machine.safe_z_movement()
-            self.machine.move_to(x=self.scale.x, y=self.scale.y)
-            # TODO: Figure out appropriate z offset from scale location to move to
-            return True
-        except Exception as e:
-            print(f"Error moving to scale: {e}")
-            return False
+        result = self.state_machine.validated_move_to_scale(
+            scale=self.scale
+        )
+        
+        if not result.valid:
+            raise RuntimeError(f"Move to scale failed: {result.reason}")
+        
+        return True
 
     def _dispense_powder(self, target_weight: float):
-        """Dispense powder to the scale"""
-        if not self.connected or not self.scale:
+        """
+        Dispense powder to the scale.
+        
+        Validates and executes through MotionPlatformStateMachine.
+        """
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        if not self.scale:
             return False
         
-        try:
-            # ...
-            return True
-        except Exception as e:
-            print(f"Error dispensing powder: {e}")
-            return False
+        result = self.state_machine.validated_dispense_powder(
+            target_weight=target_weight
+        )
+        
+        if not result.valid:
+            raise RuntimeError(f"Dispense powder failed: {result.reason}")
+        
+        return True
