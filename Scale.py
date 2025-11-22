@@ -9,6 +9,10 @@ LF = '\n'
 CRLF = CR + LF
 ACK = b'\x06'  # ASCII 06h
 
+# TODO: Update scale error handling
+# Specifics:
+# 1. If E02 is received, wait 1-5 seconds before resending command
+
 # Commands that expect ACK responses
 ACK_COMMANDS = {
     'C': False,      # Cancel - no ACK
@@ -168,6 +172,11 @@ class Scale:
                 timeout=self.timeout
             )
             self._is_connected = True
+            self.display_on()
+            time.sleep(2) # Give scale time to initialize
+            # The scale can sometimes take up to 10 seconds to start if it does self-testing
+            # In this case, some commands may fail with E02, which if why a command gets resent
+            # after an E02 response.
             print(f"[DEBUG] Serial connection established: {self.serial}")
             print(f"[DEBUG] Serial port open: {self.serial.is_open}")
         except serial.SerialException as e:
@@ -191,6 +200,99 @@ class Scale:
         """
         return self._is_connected and self.serial and self.serial.is_open
 
+    def _handle_specific_error(self, error: ScaleError, cmd: str, expect_ack: bool = True, is_dual_ack: bool = False) -> bool:
+        """
+        Handle specific error codes with unified retry logic.
+        All retry logic is contained within this function.
+        
+        Args:
+            error: The ScaleError that was received
+            cmd: The command that was being sent
+            expect_ack: Whether the command expects an ACK
+            is_dual_ack: Whether the command expects dual ACKs
+            
+        Returns:
+            True if command succeeded after error handling, False otherwise
+            
+        Raises:
+            ScaleException: If error persists after all retries
+        """
+        # Error configuration: (wait_time_seconds, max_retries)
+        # E02: wait 2 secs, resend, wait 8 secs, resend, then throw (2 retries with different wait times)
+        # E03/E11: wait 3 secs, resend, retry up to 3 times, then throw
+        error_config = {
+            ScaleError.E02: [(2, 1), (8, 1)],  # List of (wait_time, retries) pairs
+            ScaleError.E03: [(3, 3)],  # Single wait time, 3 retries
+            ScaleError.E11: [(3, 3)],  # Same as E03
+        }
+        
+        if error not in error_config:
+            return False  # Unknown error, don't handle
+        
+        error_desc = {
+            ScaleError.E02: "Not ready",
+            ScaleError.E03: "Timeout error",
+            ScaleError.E11: "Stability error",
+        }
+        
+        config = error_config[error]
+        desc = error_desc[error]
+        
+        # For E02, multiple wait/retry pairs
+        # For E03/E11, a single wait/retry pair
+        for wait_time, max_retries in config:
+            for retry_attempt in range(max_retries):
+                print(f"[DEBUG] {error.value} ({desc}) received for command '{cmd}'. Waiting {wait_time} seconds before retry {retry_attempt + 1}/{max_retries}...")
+                time.sleep(wait_time)
+                
+                # Resend command
+                self.serial.reset_input_buffer()
+                self.serial.write((cmd + CRLF).encode('ascii'))
+                print(f"[DEBUG] {error.value}: Resent command '{cmd}' after {wait_time} second wait (attempt {retry_attempt + 1})")
+                
+                # Wait for response
+                if expect_ack:
+                    ack_received, received_data, error_received = self._wait_for_ack(ACK_TIMEOUT)
+                    if ack_received:
+                        if is_dual_ack:
+                            ack_received, received_data, error_received = self._wait_for_ack(ACK_TIMEOUT)
+                            if ack_received:
+                                print(f"[DEBUG] {error.value}: Command '{cmd}' succeeded after retry")
+                                return True
+                            elif error_received == error:
+                                continue
+                            elif error_received in (ScaleError.E02, ScaleError.E03, ScaleError.E11):
+                                return self._handle_specific_error(error_received, cmd, expect_ack, is_dual_ack)
+                            else:
+                                return False
+                        else:
+                            print(f"[DEBUG] {error.value}: Command '{cmd}' succeeded after retry")
+                            return True
+                    elif error_received == error:
+                        continue
+                    elif error_received in (ScaleError.E02, ScaleError.E03, ScaleError.E11):
+                        return self._handle_specific_error(error_received, cmd, expect_ack, is_dual_ack)
+                    else:
+                        return False
+                else:
+                    time.sleep(0.20)  # Give scale time to respond
+                    data = self.serial.readline()
+                    if data:
+                        decoded = data.decode('ascii').strip()
+                        if not decoded.startswith('EC,'):
+                            print(f"[DEBUG] {error.value}: Command '{cmd}' succeeded after retry")
+                            return True
+                        err = ScaleError.from_response(decoded)
+                        if err == error:
+                            continue
+                        elif err in (ScaleError.E02, ScaleError.E03, ScaleError.E11):
+                            return self._handle_specific_error(err, cmd, expect_ack=False, is_dual_ack=False)
+                        else:
+                            return False
+        
+        # All retries exhausted, throw exception
+        raise ScaleException(f"{error.value} ({desc}) persisted after all retries for command '{cmd}'")
+
     def _wait_for_ack(self, timeout: float = ACK_TIMEOUT) -> tuple:
         """
         Wait for an ACK response from the scale.
@@ -199,10 +301,10 @@ class Scale:
             timeout: Timeout in seconds
             
         Returns:
-            Tuple of (success: bool, received_data: bytes)
+            Tuple of (success: bool, received_data: bytes, error: ScaleError or None)
             
         Raises:
-            ScaleException: If error response received instead of ACK
+            ScaleException: If error response received instead of ACK (for non-handled errors)
         """
         start_time = time.time()
         buffer = b''
@@ -227,7 +329,7 @@ class Scale:
                     if buffer:
                         print(f"[DEBUG] Data after ACK: {buffer}")
                         # Note: We can't put data back, so we'll just note it
-                    return (True, buffer)
+                    return (True, buffer, None)
                 
                 # Check for error response
                 if b'EC,' in buffer:
@@ -239,6 +341,10 @@ class Scale:
                             for line in lines:
                                 if line.startswith('EC,'):
                                     err = ScaleError.from_response(line)
+                                    # Return error instead of raising for handled errors
+                                    if err in (ScaleError.E02, ScaleError.E03, ScaleError.E11):
+                                        return (False, buffer, err)
+                                    # Raise immediately for other errors
                                     raise ScaleException(f"Scale error: {err} ({line})")
                     except UnicodeDecodeError:
                         pass
@@ -246,7 +352,7 @@ class Scale:
             time.sleep(0.01)  # Small delay to prevent busy waiting
         
         # Timeout - return the buffer we received
-        return (False, buffer)
+        return (False, buffer, None)
 
     def _send_command(self, cmd: str, expect_data: bool = False) -> str:
         """
@@ -279,7 +385,23 @@ class Scale:
                 
                 if expect_ack:
                     # Wait for first ACK
-                    ack_received, received_data = self._wait_for_ack(ACK_TIMEOUT)
+                    ack_received, received_data, error_received = self._wait_for_ack(ACK_TIMEOUT)
+                    
+                    # Handle specific errors
+                    if error_received in (ScaleError.E02, ScaleError.E03, ScaleError.E11):
+                        success = self._handle_specific_error(error_received, cmd, expect_ack, is_dual_ack)
+                        if success:
+                            # Error was handled successfully, continue with command processing
+                            ack_received = True
+                        else:
+                            # Error handling failed or returned False, retry outer loop
+                            if attempt < MAX_RETRIES - 1:
+                                print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1} after error handling, retrying...")
+                                time.sleep(RETRY_DELAY)
+                                continue
+                            else:
+                                raise ScaleException(f"Command '{cmd}' failed after error handling and {MAX_RETRIES} attempts")
+                    
                     if not ack_received:
                         if attempt < MAX_RETRIES - 1:
                             print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1}, retrying...")
@@ -292,7 +414,23 @@ class Scale:
                     
                     # For dual ACK commands, wait for second ACK
                     if is_dual_ack:
-                        ack_received, received_data = self._wait_for_ack(ACK_TIMEOUT)
+                        ack_received, received_data, error_received = self._wait_for_ack(ACK_TIMEOUT)
+                        
+                        # Handle specific errors in second ACK
+                        if error_received in (ScaleError.E02, ScaleError.E03, ScaleError.E11):
+                            success = self._handle_specific_error(error_received, cmd, expect_ack, is_dual_ack)
+                            if success:
+                                # Error was handled successfully
+                                ack_received = True
+                            else:
+                                # Error handling failed or returned False, retry outer loop
+                                if attempt < MAX_RETRIES - 1:
+                                    print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1} (second ACK after error handling), retrying...")
+                                    time.sleep(RETRY_DELAY)
+                                    continue
+                                else:
+                                    raise ScaleException(f"Command '{cmd}' failed after error handling (second ACK) and {MAX_RETRIES} attempts")
+                        
                         if not ack_received:
                             if attempt < MAX_RETRIES - 1:
                                 print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1} (second ACK), retrying...")
@@ -326,7 +464,38 @@ class Scale:
                     # Check for error in data response
                     if decoded.startswith('EC,'):
                         err = ScaleError.from_response(decoded)
-                        raise ScaleException(f"Scale error in data response: {err} ({decoded})")
+                        
+                        # Handle specific errors in data response
+                        if err in (ScaleError.E02, ScaleError.E03, ScaleError.E11):
+                            success = self._handle_specific_error(err, cmd, expect_ack=False, is_dual_ack=False)
+                            if success:
+                                # Error was handled successfully, re-read data response
+                                data = self.serial.readline()
+                                if not data:
+                                    if attempt < MAX_RETRIES - 1:
+                                        print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1} (no data after error handling), retrying...")
+                                        time.sleep(RETRY_DELAY)
+                                        continue
+                                    else:
+                                        raise ScaleException("No data response from scale after error handling")
+                                decoded = data.decode('ascii').strip()
+                                print(f"[DEBUG] Data response after error handling: {decoded}")
+                                # Check again for errors
+                                if decoded.startswith('EC,'):
+                                    err = ScaleError.from_response(decoded)
+                                    raise ScaleException(f"Scale error in data response after handling: {err} ({decoded})")
+                                return decoded
+                            else:
+                                # Error handling failed or returned False, retry outer loop
+                                if attempt < MAX_RETRIES - 1:
+                                    print(f"[DEBUG] Command '{cmd}' failed on attempt {attempt + 1} after error handling, retrying...")
+                                    time.sleep(RETRY_DELAY)
+                                    continue
+                                else:
+                                    raise ScaleException(f"Scale error in data response: {err} ({decoded})")
+                        else:
+                            # Other errors, raise immediately
+                            raise ScaleException(f"Scale error in data response: {err} ({decoded})")
                     
                     return decoded
                 
