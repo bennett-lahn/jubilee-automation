@@ -14,15 +14,12 @@ from pathlib import Path
 
 # Import Jubilee components
 from science_jubilee.Machine import Machine
-from science_jubilee.decks.Deck import Deck
 from Trickler import Trickler
 from Scale import Scale
-from trickler_labware import WeightWell
 from PistonDispenser import PistonDispenser
 from Manipulator import Manipulator, ToolStateError
 from MotionPlatformStateMachine import MotionPlatformStateMachine
 from ConfigLoader import config
-from functools import wraps
 
 class JubileeManager:
     """
@@ -39,102 +36,33 @@ class JubileeManager:
         self.manipulator: Optional[Manipulator] = None
         self.state_machine: Optional[MotionPlatformStateMachine] = None
         self.connected = False
-        self.piston_dispensers: List[PistonDispenser] = [PistonDispenser(i, num_pistons_per_dispenser) for i in range(num_piston_dispensers)]
-
-        # Dispenser 0 is always at x=320, y=337 and future dispensers are each offset by 42.5 mm in the x-axis
-        # The stored x/y is the "ready point" 35mm in front of the dispenser
-        # TODO: Move these numbers to a config file
-        num = 0
-        for dispenser in self.piston_dispensers:
-            dispenser.x = 320 + num*42.5
-            dispenser.y = 337
-            num = num + 1
-            
-        # Initialize deck with weight well configuration
-        self.deck: Optional[Deck] = None
-        self._initialize_deck()
+        self._num_piston_dispensers = num_piston_dispensers
+        self._num_pistons_per_dispenser = num_pistons_per_dispenser
     
     @property
     def machine_read_only(self) -> Optional[Machine]:
         """
         Access to machine through state machine.
-        This should ONLY be used
+        This should ONLY be used for actions that do not change the Jubilee's state,
+        even though it is possible to do so (IT IS UNSAFE).
         """
         if self.state_machine:
             return self.state_machine.machine
         return None
     
-    def _initialize_deck(self):
-        """Initialize the deck with weight wells in each slot"""
-        try:
-            # Load the deck configuration
-            # Override deck safe_z from centralized config
-            self.deck = Deck("weight_well_deck", path="./jubilee_api_config")
-            
-            # Load weight well labware into each slot
-            for i in range(16):
-                # Load the weight well labware into each slot
-                labware = self.deck.load_labware("weight_well_labware", i, path="./jubilee_api_config")
-                
-                # Convert the labware wells to WeightWell objects
-                for well_name, well in labware.wells.items():
-                    # Create state machine position name from well name
-                    # well_name is typically like "A1", "B3", etc.
-                    ready_pos = f"mold_ready_{well_name}"
-                    
-                    # Create a WeightWell with only required fields and defaults for custom parameters
-                    weight_well = WeightWell(
-                        name=well_name,  # name
-                        x=well.x + labware.offset[0],  # x
-                        y=well.y + labware.offset[1],  # y
-                        z=well.z + labware.offset[2] if len(labware.offset) > 2 else well.z,  # z
-                        offset=well.offset,  # offset
-                        slot=well.slot,  # slot
-                        labware_name=well.labware_name,  # labware_name
-                        # WeightWell custom parameters with defaults
-                        valid=True,
-                        has_top_piston=False,
-                        current_weight=0.0,
-                        target_weight=0.0,
-                        max_weight=None,
-                        ready_pos=ready_pos  # State machine position name
-                    )
-                    
-                    # Replace the regular well with our WeightWell
-                    labware.wells[well_name] = weight_well
-                
-        except Exception as e:
-            print(f"Error initializing deck: {e}")
-            self.deck = None
-    
-    def _get_well_from_deck(self, well_id: str) -> Optional[WeightWell]:
-        """Get a weight well from the deck by well ID"""
-        if not self.deck:
-            return None
-        
-        # Convert well_id to slot index
-        # Layout: Row A has 7 molds (0-6), Row B has 7 molds (7-13), Row C has 4 molds (14-17)
-        row = ord(well_id[0].upper()) - ord('A')
-        col = int(well_id[1:]) - 1
-        
-        # Calculate slot index based on row
-        if row == 0:  # Row A: slots 0-6
-            slot_index = col
-        elif row == 1:  # Row B: slots 7-13
-            slot_index = 7 + col
-        elif row == 2:  # Row C: slots 14-17
-            slot_index = 14 + col
-        else:
-            return None
-        
-        if str(slot_index) in self.deck.slots:
-            slot = self.deck.slots[str(slot_index)]
-            if slot.has_labware and hasattr(slot.labware, 'wells'):
-                # Get the first (and only) well from the labware
-                for well in slot.labware.wells.values():
-                    if isinstance(well, WeightWell):
-                        return well
+    @property
+    def deck(self) -> Optional[Deck]:
+        """Access to deck through state machine."""
+        if self.state_machine:
+            return self.state_machine.context.deck
         return None
+    
+    @property
+    def piston_dispensers(self) -> List[PistonDispenser]:
+        """Access to piston dispensers through state machine."""
+        if self.state_machine:
+            return self.state_machine.context.piston_dispensers
+        return []
         
     def connect(
         self,
@@ -168,6 +96,13 @@ class JubileeManager:
             self.state_machine = MotionPlatformStateMachine.from_config_file(
                 config_path,
                 real_machine
+            )
+            
+            # Initialize deck and dispensers in state machine
+            self.state_machine.initialize_deck()
+            self.state_machine.initialize_dispensers(
+                num_piston_dispensers=self._num_piston_dispensers,
+                num_pistons_per_dispenser=self._num_pistons_per_dispenser
             )
             
             # Connect to scale
@@ -252,13 +187,14 @@ class JubileeManager:
             if not self.scale or not self.scale.is_connected:
                 raise ToolStateError("Scale is not connected or provided.")
             
-            # Get the well from the deck
-            well = self._get_well_from_deck(well_id)
+            if not self.state_machine:
+                raise RuntimeError("State machine not configured")
+            
+            well = self.state_machine.get_well_from_deck(well_id)
             if not well:
                 raise ToolStateError(f"Well {well_id} not found in deck.")
             if not well.valid:
                 raise ToolStateError("Well is not valid.")
-            # TODO: Move this check to state machine?
             if well.has_top_piston:
                 raise ToolStateError("Well already has a top piston. Cannot dispense.")
             
@@ -324,11 +260,6 @@ class JubileeManager:
             if not result.valid:
                 raise RuntimeError(f"Failed to retrieve piston: {result.reason}")
             
-            # Update state after successful retrieval
-            self.piston_dispensers[dispenser_index].remove_piston()
-            well = self._get_well_from_deck(well_id)
-            if well:
-                well.has_top_piston = True
             
             return True
         except Exception as e:
@@ -345,12 +276,10 @@ class JubileeManager:
         if not self.state_machine:
             raise RuntimeError("State machine not configured")
         
-        # Get the well to access its ready_pos
-        well = self._get_well_from_deck(well_id)
+        well = self.state_machine.get_well_from_deck(well_id)
         
         result = self.state_machine.validated_move_to_well(
             well_id=well_id,
-            deck=self.deck,
             scale=self.scale,
             well=well  # Pass well object so validated_move_to_well can use ready_pos
         )

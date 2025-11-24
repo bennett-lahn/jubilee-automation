@@ -144,10 +144,8 @@ class Manipulator(Tool):
 
     def __init__(self, index, name, state_machine=None, config=None):
         super().__init__(index, name)
-        self.current_well = None  # WeightWell object representing the current mold
         self.state_machine = state_machine  # Reference to MotionPlatformStateMachine
         self.config = config
-        self.placed_well_on_scale = False # Do not do anything except pick up well from scale if True
         
         # Tamper-specific attributes
         self.tamper_axis = 'V'  # Default axis for tamper movement
@@ -189,14 +187,12 @@ class Manipulator(Tool):
         self.tamper_acceleration = movement_config.get('acceleration', self.tamper_acceleration)
     
     def _get_config_dict(self) -> Dict[str, Any]:
-        """Helper to package manipulator state for state machine calls."""
+        """Helper to package manipulator configuration for state machine calls."""
         return {
-            'current_well': self.current_well,
             'tamper_axis': self.tamper_axis,
             'tamper_travel_pos': self.TAMP_AXIS_TRAVEL_POS,
             'safe_z': self.SAFE_Z,
             'dispenser_safe_z': self.DISPENSER_SAFE_Z,
-            'placed_well_on_scale': self.placed_well_on_scale,
         }
     
     @property
@@ -205,6 +201,20 @@ class Manipulator(Tool):
         if self.state_machine:
             return self.state_machine.machine
         return None
+    
+    @property
+    def current_well(self):
+        """Access to current well through state machine."""
+        if self.state_machine:
+            return self.state_machine.context.current_well
+        return None
+    
+    @property
+    def placed_well_on_scale(self):
+        """Access to mold_on_scale state through state machine."""
+        if self.state_machine:
+            return self.state_machine.context.mold_on_scale
+        return False
 
     def home_tamper(self, machine_connection=None):
         """
@@ -320,8 +330,6 @@ class Manipulator(Tool):
         """
         if not self.state_machine:
             raise RuntimeError("State machine not configured")
-        
-        # Call state machine method which validates and executes
         result = self.state_machine.validated_pick_mold_from_well(
             mold=mold,
             manipulator_config=self._get_config_dict()
@@ -329,9 +337,6 @@ class Manipulator(Tool):
         
         if not result.valid:
             raise ToolStateError(f"Cannot pick mold: {result.reason}")
-        
-        # Update local state after successful execution
-        self.current_well = mold
 
     def place_well(self) -> WeightWell:
         """
@@ -344,8 +349,6 @@ class Manipulator(Tool):
             raise RuntimeError("State machine not configured")
         
         mold_to_place = self.current_well
-        
-        # Call state machine method which validates and executes
         result = self.state_machine.validated_place_mold_in_well(
             manipulator_config=self._get_config_dict()
         )
@@ -353,8 +356,6 @@ class Manipulator(Tool):
         if not result.valid:
             raise ToolStateError(f"Cannot place mold: {result.reason}")
         
-        # Update local state after successful execution
-        self.current_well = None
         return mold_to_place
 
     def place_top_piston(self, piston_dispenser: PistonDispenser):
@@ -376,10 +377,6 @@ class Manipulator(Tool):
         if not result.valid:
             raise ToolStateError(f"Cannot place top piston: {result.reason}")
         
-        # Update local state after successful execution
-        if self.current_well:
-            self.current_well.has_top_piston = True
-        
         return True
 
     def place_well_on_scale(self, scale: Scale):
@@ -400,8 +397,6 @@ class Manipulator(Tool):
         if not result.valid:
             raise ToolStateError(f"Cannot place mold on scale: {result.reason}")
         
-        # Update local state after successful execution
-        self.placed_well_on_scale = True
         return True
 
     def pick_well_from_scale(self, scale: Scale):
@@ -422,6 +417,4 @@ class Manipulator(Tool):
         if not result.valid:
             raise ToolStateError(f"Cannot pick mold from scale: {result.reason}")
         
-        # Update local state after successful execution
-        self.placed_well_on_scale = False
         return True

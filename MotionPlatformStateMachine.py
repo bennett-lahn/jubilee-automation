@@ -4,10 +4,12 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Sequence
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from statemachine import State, StateMachine
 from science_jubilee.Machine import Machine
+from science_jubilee.decks.Deck import Deck
+from PistonDispenser import PistonDispenser
 from MotionPlatformExecutor import MovementExecutor
 
 
@@ -117,6 +119,11 @@ class MotionContext:
     engaged_ready_position_id: Optional[str] = None
     engaged_tool_id: Optional[str] = None
     metadata: Dict[str, object] = field(default_factory=dict)
+    # Platform state tracking
+    deck: Optional[Deck] = None
+    current_well: Optional[object] = None  # WeightWell object representing the mold being carried
+    mold_on_scale: bool = False  # Whether the current mold is on the scale
+    piston_dispensers: List[object] = field(default_factory=list)  # List of PistonDispenser objects
 
 
 @dataclass
@@ -448,6 +455,118 @@ class MotionPlatformStateMachine(StateMachine):
         return cls(registry, machine, context=context)
 
     # ---------------------------------------------------------------------
+    # Platform State Initialization
+    # ---------------------------------------------------------------------
+    
+    def initialize_deck(self, deck_name: str = "weight_well_deck", config_path: str = "./jubilee_api_config"):
+        """
+        Initialize the deck with weight wells in each slot.
+        
+        Args:
+            deck_name: Name of the deck configuration
+            config_path: Path to the deck configuration files
+        """
+        from trickler_labware import WeightWell
+        
+        try:
+            # Load the deck configuration
+            self.context.deck = Deck(deck_name, path=config_path)
+            
+            # Load weight well labware into each slot
+            for i in range(16):
+                labware = self.context.deck.load_labware("weight_well_labware", i, path=config_path)
+                for well_name, well in labware.wells.items():
+                    # Create state machine position name from well name
+                    # well_name is typically like "A1", "B3", etc.
+                    ready_pos = f"mold_ready_{well_name}"
+                    
+                    # Create a WeightWell with only required fields and defaults for custom parameters
+                    weight_well = WeightWell(
+                        name=well_name,  # name
+                        x=well.x + labware.offset[0],  # x
+                        y=well.y + labware.offset[1],  # y
+                        z=well.z + labware.offset[2] if len(labware.offset) > 2 else well.z,  # z
+                        offset=well.offset,  # offset
+                        slot=well.slot,  # slot
+                        labware_name=well.labware_name,  # labware_name
+                        # WeightWell custom parameters with defaults
+                        valid=True,
+                        has_top_piston=False,
+                        current_weight=0.0,
+                        target_weight=0.0,
+                        max_weight=None,
+                        ready_pos=ready_pos  # State machine position name
+                    )
+                    
+                    # Replace the regular well with our WeightWell
+                    labware.wells[well_name] = weight_well
+                
+        except Exception as e:
+            print(f"Error initializing deck: {e}")
+            self.context.deck = None
+    
+    def initialize_dispensers(self, num_piston_dispensers: int = 0, num_pistons_per_dispenser: int = 0):
+        """
+        Initialize piston dispensers.
+        
+        Args:
+            num_piston_dispensers: Number of piston dispensers
+            num_pistons_per_dispenser: Number of pistons in each dispenser
+        """
+        
+        self.context.piston_dispensers = [
+            PistonDispenser(i, num_pistons_per_dispenser) 
+            for i in range(num_piston_dispensers)
+        ]
+        
+        # Dispenser 0 is always at x=320, y=337 and future dispensers are each offset by 42.5 mm in the x-axis
+        # The stored x/y is the "ready point" 35mm in front of the dispenser
+        # TODO: Move these numbers to a config file
+        num = 0
+        for dispenser in self.context.piston_dispensers:
+            dispenser.x = 320 + num * 42.5
+            dispenser.y = 337
+            num = num + 1
+    
+    def get_well_from_deck(self, well_id: str) -> Optional[object]:
+        """
+        Get a weight well object from the deck by well ID.
+        
+        Args:
+            well_id: Well identifier (e.g., "A1", "B3")
+            
+        Returns:
+            WeightWell object if found, None otherwise
+        """
+        if not self.context.deck:
+            return None
+        
+        # Convert well_id to slot index
+        # Layout: Row A has 7 molds (0-6), Row B has 7 molds (7-13), Row C has 4 molds (14-17)
+        row = ord(well_id[0].upper()) - ord('A')
+        col = int(well_id[1:]) - 1
+        
+        # Calculate slot index based on row
+        if row == 0:  # Row A: slots 0-6
+            slot_index = col
+        elif row == 1:  # Row B: slots 7-13
+            slot_index = 7 + col
+        elif row == 2:  # Row C: slots 14-17
+            slot_index = 14 + col
+        else:
+            return None
+        
+        if str(slot_index) in self.context.deck.slots:
+            slot = self.context.deck.slots[str(slot_index)]
+            if slot.has_labware and hasattr(slot.labware, 'wells'):
+                # Get the first (and only) well from the labware
+                for well in slot.labware.wells.values():
+                    from trickler_labware import WeightWell
+                    if isinstance(well, WeightWell):
+                        return well
+        return None
+
+    # ---------------------------------------------------------------------
     # Machine Access
     # ---------------------------------------------------------------------
     @property
@@ -470,8 +589,8 @@ class MotionPlatformStateMachine(StateMachine):
         """Validate and execute picking up a mold from a well."""
         from trickler_labware import WeightWell
         
-        # Validate manipulator state
-        if manipulator_config.get('current_well') is not None:
+        # Validate manipulator state using state machine's internal state
+        if self.context.current_well is not None:
             return MoveValidationResult(
                 valid=False,
                 reason="Manipulator already carrying a mold"
@@ -503,6 +622,9 @@ class MotionPlatformStateMachine(StateMachine):
                 tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0),
                 safe_z=manipulator_config.get('safe_z', 195.0)
             )
+            # Update state machine state
+            self.context.current_well = mold
+            self.context.mold_on_scale = False
             return MoveValidationResult(valid=True)
         except Exception as e:
             return MoveValidationResult(
@@ -515,14 +637,13 @@ class MotionPlatformStateMachine(StateMachine):
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
         """Validate and execute placing a mold in a well."""
-        # Validate manipulator state
-        if manipulator_config.get('current_well') is None:
+        if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
                 reason="Not carrying a mold"
             )
         
-        mold = manipulator_config.get('current_well')
+        mold = self.context.current_well
         
         # Execute the move
         try:
@@ -532,6 +653,9 @@ class MotionPlatformStateMachine(StateMachine):
                 tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0),
                 safe_z=manipulator_config.get('safe_z', 195.0)
             )
+            # Update state machine state
+            self.context.current_well = None
+            self.context.mold_on_scale = False
             return MoveValidationResult(valid=True)
         except Exception as e:
             return MoveValidationResult(
@@ -545,14 +669,13 @@ class MotionPlatformStateMachine(StateMachine):
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
         """Validate and execute placing mold on scale."""
-        # Validate manipulator state
-        if manipulator_config.get('current_well') is None:
+        if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
                 reason="Not carrying a mold"
             )
         
-        mold = manipulator_config.get('current_well')
+        mold = self.context.current_well
         
         if mold.has_top_piston:
             return MoveValidationResult(
@@ -560,7 +683,7 @@ class MotionPlatformStateMachine(StateMachine):
                 reason="Cannot place mold with piston on scale"
             )
         
-        if manipulator_config.get('placed_well_on_scale', False):
+        if self.context.mold_on_scale:
             return MoveValidationResult(
                 valid=False,
                 reason="Mold is already on scale"
@@ -573,6 +696,8 @@ class MotionPlatformStateMachine(StateMachine):
                 tamper_axis=manipulator_config.get('tamper_axis', 'V'),
                 tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0)
             )
+            # Update state machine state
+            self.context.mold_on_scale = True
             return MoveValidationResult(valid=True)
         except Exception as e:
             return MoveValidationResult(
@@ -586,14 +711,13 @@ class MotionPlatformStateMachine(StateMachine):
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
         """Validate and execute picking mold from scale."""
-        # Validate manipulator state
-        if manipulator_config.get('current_well') is None:
+        if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
                 reason="Not carrying a mold"
             )
         
-        if not manipulator_config.get('placed_well_on_scale', False):
+        if not self.context.mold_on_scale:
             return MoveValidationResult(
                 valid=False,
                 reason="Mold is not on scale"
@@ -606,6 +730,7 @@ class MotionPlatformStateMachine(StateMachine):
                 tamper_axis=manipulator_config.get('tamper_axis', 'V'),
                 tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0)
             )
+            self.context.mold_on_scale = False
             return MoveValidationResult(valid=True)
         except Exception as e:
             return MoveValidationResult(
@@ -619,14 +744,13 @@ class MotionPlatformStateMachine(StateMachine):
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
         """Validate and execute placing top piston."""
-        # Validate manipulator state
-        if manipulator_config.get('current_well') is None:
+        if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
                 reason="Not carrying a mold"
             )
         
-        mold = manipulator_config.get('current_well')
+        mold = self.context.current_well
         
         if mold.has_top_piston:
             return MoveValidationResult(
@@ -640,7 +764,7 @@ class MotionPlatformStateMachine(StateMachine):
                 reason="No pistons available in dispenser"
             )
         
-        if manipulator_config.get('placed_well_on_scale', False):
+        if self.context.mold_on_scale:
             return MoveValidationResult(
                 valid=False,
                 reason="Cannot add top piston when mold is on scale"
@@ -654,6 +778,7 @@ class MotionPlatformStateMachine(StateMachine):
                 tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0),
                 dispenser_safe_z=manipulator_config.get('dispenser_safe_z', 254.0)
             )
+            mold.has_top_piston = True
             return MoveValidationResult(valid=True)
         except Exception as e:
             return MoveValidationResult(
@@ -667,20 +792,19 @@ class MotionPlatformStateMachine(StateMachine):
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
         """Validate and execute tamping action."""
-        # Validate manipulator state
-        if manipulator_config.get('current_well') is None:
+        if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
                 reason="Not carrying a mold"
             )
         
-        if not manipulator_config.get('placed_well_on_scale', False):
+        if not self.context.mold_on_scale:
             return MoveValidationResult(
                 valid=False,
                 reason="Mold must be on scale to tamp"
             )
         
-        mold = manipulator_config.get('current_well')
+        mold = self.context.current_well
         if mold.has_top_piston:
             return MoveValidationResult(
                 valid=False,
@@ -1013,22 +1137,30 @@ class MotionPlatformStateMachine(StateMachine):
     def validated_move_to_well(
         self,
         well_id: str,
-        deck,
-        scale,
+        deck=None,
+        scale=None,
         well: Optional[object] = None
     ) -> MoveValidationResult:
         """
         Validate and execute movement to a specific well.
         
         Args:
-            well_id: Well identifier (e.g., "A1") - used for backward compatibility
-            deck: Deck object with well configuration
-            scale: Scale instance
+            well_id: Well identifier (e.g., "A1")
+            deck: Optional deck object (uses state machine's deck if not provided)
+            scale: Optional scale instance (for validation)
             well: Optional WeightWell object - if provided, uses well.ready_pos for position
             
         Returns:
             MoveValidationResult with outcome
         """
+        # Use state machine's deck if not provided
+        if deck is None:
+            deck = self.context.deck
+        
+        # Get well from state machine's deck if not provided
+        if well is None:
+            well = self.get_well_from_deck(well_id)
+        
         # Determine target position from well's ready_pos if available, otherwise construct from well_id
         if well and hasattr(well, 'ready_pos') and well.ready_pos:
             target_position = well.ready_pos
@@ -1323,14 +1455,13 @@ class MotionPlatformStateMachine(StateMachine):
                 reason=f"Must be at {expected_position} to retrieve piston from dispenser {piston_dispenser.index}. Current position: {self.context.position_id}"
             )
         
-        # Validate manipulator state
-        if manipulator_config.get('current_well') is None:
+        if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
                 reason="Not carrying a mold"
             )
         
-        mold = manipulator_config.get('current_well')
+        mold = self.context.current_well
         
         if mold.has_top_piston:
             return MoveValidationResult(
@@ -1344,7 +1475,7 @@ class MotionPlatformStateMachine(StateMachine):
                 reason="No pistons available in dispenser"
             )
         
-        if manipulator_config.get('placed_well_on_scale', False):
+        if self.context.mold_on_scale:
             return MoveValidationResult(
                 valid=False,
                 reason="Cannot add top piston when mold is on scale"
@@ -1359,6 +1490,10 @@ class MotionPlatformStateMachine(StateMachine):
             tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0),
             dispenser_safe_z=manipulator_config.get('dispenser_safe_z', 254.0)
         )
+        
+        if result.valid:
+            mold.has_top_piston = True
+            piston_dispenser.remove_piston()
         
         return result
     

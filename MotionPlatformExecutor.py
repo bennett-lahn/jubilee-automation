@@ -9,6 +9,9 @@ The executor is owned by the state machine and is not accessed directly by other
 components, so all movements go through validation.
 """
 
+# TODO: Using machine.move_to invokes @requires_safe_z and @requires_homed. What behavior might result
+# if the function is called when these conditions aren't true (if this is even possible with the state machine?)
+
 from typing import Optional
 from science_jubilee.Machine import Machine
 from Scale import Scale
@@ -66,12 +69,10 @@ class MovementExecutor:
         self._machine.move(z=148, s=500)  # Move until tamper leadscrew almost grounded
         self._machine._set_relative_positioning()
         self._machine.move(y=-25.5, s=500)  # Move to the side of the mold
-        self._machine._set_absolute_positioning()
-        self._machine.gcode(f"G1 {tamper_axis}50 F50")  # Move mold holder down
+        self._machine.move_to(v=50, s=50)  # Move mold holder down
         self._machine._set_relative_positioning()
         self._machine.move(y=25.5, s=500)  # Move back under mold
-        self._machine._set_absolute_positioning()
-        self._machine.gcode(f"G1 {tamper_axis}30 F50")  # Pick up mold and move to travel position
+        self._machine.move_to(v=tamper_travel_pos, s=50)  # Pick up mold and move to travel position
         self._machine.safe_z_movement()  # Move back to safe z
     
     def execute_place_mold_in_well(
@@ -94,11 +95,10 @@ class MovementExecutor:
         
         self._machine._set_absolute_positioning()
         self._machine.move(z=148, s=500)  # Move until tamper leadscrew almost grounded
-        self._machine.gcode(f"G1 {tamper_axis}50 F50")  # Put down mold holder
+        self._machine.move_to(v=50, s=50)  # Put down mold holder
         self._machine._set_relative_positioning()
         self._machine.move(y=-25.5, s=500)  # Move out from under mold
-        self._machine._set_absolute_positioning()
-        self._machine.gcode(f"G1 {tamper_axis}30 F50")  # Move into tamper travel position
+        self._machine.move_to(v=tamper_travel_pos, s=50)  # Move into tamper travel position
         self._machine.safe_z_movement()  # Move back to safe z
     
     def execute_place_mold_on_scale(
@@ -122,9 +122,9 @@ class MovementExecutor:
         
         self._machine._set_absolute_positioning()
         self._machine.move_to(z=134, s=500)  # Move to 5mm above scale
-        self._machine.gcode(f"G1 {tamper_axis}38.5 F50")  # Move well to fit under trickler
+        self._machine.move_to(v=38.5, s=50)  # Move well to fit under trickler
         self._machine.move(y=184, s=500)  # Move well under trickler
-        self._machine.gcode(f"G1 {tamper_axis}45 F50")  # Place well on scale
+        self._machine.move_to(v=45, s=50)  # Place well on scale
     
     def execute_pick_mold_from_scale(
         self,
@@ -145,10 +145,10 @@ class MovementExecutor:
         print("Picking mold from scale")
         
         self._machine._set_absolute_positioning()
-        self._machine.gcode(f"G1 {tamper_axis}38.5 F50")  # Pick up mold
+        self._machine.move_to(v=38.5, s=50)  # Pick up mold
         self._machine.move(y=scale.y, s=500)  # Move from under trickler
         self._machine.safe_z_movement()  # Move to safe z
-        self._machine.gcode(f"G1 {tamper_axis}{tamper_travel_pos} F50")  # Move to travel position
+        self._machine.move_to(v=tamper_travel_pos, s=50)  # Move to travel position
     
     def execute_place_top_piston(
         self,
@@ -169,14 +169,13 @@ class MovementExecutor:
         print(f"Placing top piston from dispenser {piston_dispenser.index}")
         
         self._machine._set_absolute_positioning()
-        self._machine.gcode(f"G1 {tamper_axis}52 F50")  # Fully lower mold
+        self._machine.move_to(v=52, s=50)  # Fully lower mold
         self._machine.move(z=189, s=500)  # Move so mold fits under cap
         self._machine._set_relative_positioning()
         self._machine.move(y=35, s=500)  # Move under cap dispenser
-        self._machine._set_absolute_positioning()
-        self._machine.gcode(f"G1 {tamper_axis}37.3 F50")  # Move to pick up cap
+        self._machine.move_to(v=37.3, s=50)  # Move to pick up cap
         self._machine.move(x=piston_dispenser.x, y=piston_dispenser.y, s=500)  # Return to start
-        self._machine.gcode(f"G1 {tamper_axis}{tamper_travel_pos} F50")  # Move to travel position
+        self._machine.move_to(v=tamper_travel_pos, s=50)  # Move to travel position
     
     def execute_tamp(
         self,
@@ -193,9 +192,9 @@ class MovementExecutor:
         print("Executing tamp")
         
         self._machine._set_absolute_positioning()
-        self._machine.gcode(f"G1 {tamper_axis}38.5 F50")  # Prepare for tamp
+        self._machine.move_to(v=38.5, s=50)  # Prepare for tamp
         self._machine.move(y=scale.y, s=50)  # Move from under trickler
-        self._machine.gcode(f"G1 {tamper_axis}0 F50")  # Move until stall detection stops movement
+        self._machine.move_to(v=0, s=50)  # Move until stall detection stops movement
     
     # ===== BASIC MOVEMENTS =====
     

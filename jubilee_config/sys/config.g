@@ -1,7 +1,5 @@
 ; Jubilee
 
-; TODO: Update constants for manipulator stepper before running for the first time
-
 ToolChanging Printer - Config File
 ; This file intended for Duet 3 hardware, main board plus one expansion boards
 
@@ -119,8 +117,11 @@ M566 W80                               ; Scale jerk (deg/min)
 ;-------------------------------------------------------------------------------
 M950 S0 C"laser" ; assign GPIO port 0 to LASER/VFD port, servo mode for the trickler servo
 
+; Trickler Vibrator
+;-------------------------------------------------------------------------------
 
-
+; Allocate a GPIO port on OUT_3 at 100 Hz PWM
+M950 P0 C"out3" Q100      ; P0 = GpOut port 0, C"out4" = use OUT_4, Q100 = 100 Hz
 
 ; Endstops and probes 
 ;-------------------------------------------------------------------------------
@@ -141,6 +142,7 @@ G31 K0 X0 Y0 Z-2         ; Set the limit switch as the "Control Point"
 ; in the 305mmx305mm build plate.
 M208 X-13.75:313.75 Y-44:341 Z0:295 V0:60
 M208 U0:200            ; Set Elastic Lock (U axis) max rotation angle
+M208 W-5000000:5000000 ; Set scale rotational axis to be arbitrarily large. 
 
 ; Manipulator stall detection
 ; V = axis, S3 = threshold, F1 = filtered, H200 = min speed, R2 = create event

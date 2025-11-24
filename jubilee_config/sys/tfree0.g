@@ -13,3 +13,6 @@ G53 G0 X40.0 Y270.0 F3000    ; Rapid to the back of the post. Stay away from the
 G53 G1 Y320.0 F500           ; Controlled move to the park position with tool-1. (park_x, park_y)
 M98 P"/macros/tool_unlock.g" ; Unlock the tool
 G53 G1 Y280 F500             ; Retract the pin.
+G1 V0                        ; Return tool to 0 position so that it will not try to re-home next time with
+                             ; the limit switch already engaged. This position should only occur when tamping,
+                             ; but better to be safe.
