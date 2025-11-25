@@ -10,7 +10,8 @@ from statemachine import State, StateMachine
 from science_jubilee.Machine import Machine
 from science_jubilee.decks.Deck import Deck
 from PistonDispenser import PistonDispenser
-from MotionPlatformExecutor import MovementExecutor
+from MovementExecutor import MovementExecutor
+from Scale import Scale
 
 
 class PositionType(Enum):
@@ -121,6 +122,7 @@ class MotionContext:
     metadata: Dict[str, object] = field(default_factory=dict)
     # Platform state tracking
     deck: Optional[Deck] = None
+    scale: Optional[Scale] = None  # Reference to scale object
     current_well: Optional[object] = None  # WeightWell object representing the mold being carried
     mold_on_scale: bool = False  # Whether the current mold is on the scale
     piston_dispensers: List[object] = field(default_factory=list)  # List of PistonDispenser objects
@@ -405,21 +407,24 @@ class MotionPlatformStateMachine(StateMachine):
     disengage_tool = tool_engaged.to(idle)
     abort_motion = moving.to(idle)
 
-    def __init__(self, registry: PositionRegistry, machine: Machine, *, context: Optional[MotionContext] = None) -> None:
+    def __init__(self, registry: PositionRegistry, machine: Machine, *, context: Optional[MotionContext] = None, scale: Optional[Scale] = None) -> None:
         self._registry = registry
         self._actions = registry.actions
-        self._executor = MovementExecutor(machine)
-
+        
         if context is None:
             initial_descriptor = registry.find_first_of_type(PositionType.GLOBAL_READY)
             if not initial_descriptor:
                 raise ValueError("Configuration must define a GLOBAL_READY position.")
-            context = MotionContext(position_id=initial_descriptor.identifier)
+            context = MotionContext(position_id=initial_descriptor.identifier, scale=scale)
         else:
             # Ensure the provided context references a known position.
             self._registry.get(context.position_id)
+            # Update scale if provided
+            if scale is not None:
+                context.scale = scale
 
         self.context = context
+        self._executor = MovementExecutor(machine, scale=scale)
         super().__init__()
 
     @classmethod
@@ -429,6 +434,7 @@ class MotionPlatformStateMachine(StateMachine):
         machine: Machine,
         *,
         context_overrides: Optional[Mapping[str, object]] = None,
+        scale: Optional[Scale] = None,
     ) -> "MotionPlatformStateMachine":
         registry = PositionRegistry.from_config_file(path)
         initial_descriptor = registry.find_first_of_type(PositionType.GLOBAL_READY)
@@ -446,13 +452,14 @@ class MotionPlatformStateMachine(StateMachine):
             engaged_ready_position_id=None,
             engaged_tool_id=None,
             metadata={},
+            scale=scale,
         )
 
         if context_overrides:
             context_kwargs.update(context_overrides)
 
         context = MotionContext(**context_kwargs)
-        return cls(registry, machine, context=context)
+        return cls(registry, machine, context=context, scale=scale)
 
     # ---------------------------------------------------------------------
     # Platform State Initialization
@@ -583,10 +590,16 @@ class MotionPlatformStateMachine(StateMachine):
     
     def validated_pick_mold_from_well(
         self,
-        mold,
+        well_id: str,
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
-        """Validate and execute picking up a mold from a well."""
+        """
+        Validate and execute picking up a mold from a well.
+        
+        Args:
+            well_id: Well identifier (e.g., "A1")
+            manipulator_config: Configuration dict for the manipulator
+        """
         from trickler_labware import WeightWell
         
         # Validate manipulator state using state machine's internal state
@@ -596,19 +609,33 @@ class MotionPlatformStateMachine(StateMachine):
                 reason="Manipulator already carrying a mold"
             )
         
-        if not isinstance(mold, WeightWell):
+        # Get well from deck
+        if self.context.deck is None:
+            return MoveValidationResult(
+                valid=False,
+                reason="Deck not configured"
+            )
+        
+        well = self.get_well_from_deck(well_id)
+        if well is None:
+            return MoveValidationResult(
+                valid=False,
+                reason=f"Well {well_id} not found"
+            )
+        
+        if not isinstance(well, WeightWell):
             return MoveValidationResult(
                 valid=False,
                 reason="Invalid mold object"
             )
         
-        if not mold.valid:
+        if not well.valid:
             return MoveValidationResult(
                 valid=False,
                 reason="Mold is not valid"
             )
         
-        if mold.has_top_piston:
+        if well.has_top_piston:
             return MoveValidationResult(
                 valid=False,
                 reason="Cannot pick up mold that already has a top piston"
@@ -617,13 +644,14 @@ class MotionPlatformStateMachine(StateMachine):
         # Execute the move
         try:
             self._executor.execute_pick_mold_from_well(
-                mold=mold,
+                well_id=well_id,
+                deck=self.context.deck,
                 tamper_axis=manipulator_config.get('tamper_axis', 'V'),
                 tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0),
                 safe_z=manipulator_config.get('safe_z', 195.0)
             )
             # Update state machine state
-            self.context.current_well = mold
+            self.context.current_well = well
             self.context.mold_on_scale = False
             return MoveValidationResult(valid=True)
         except Exception as e:
@@ -634,24 +662,37 @@ class MotionPlatformStateMachine(StateMachine):
     
     def validated_place_mold_in_well(
         self,
-        manipulator_config: Dict[str, object]
+        well_id: str,
+        manipulator_config: Optional[Dict[str, object]] = None
     ) -> MoveValidationResult:
-        """Validate and execute placing a mold in a well."""
+        """
+        Validate and execute placing a mold in a well.
+        
+        Args:
+            well_id: Well identifier (e.g., "A1")
+            manipulator_config: Configuration dict for the manipulator
+        """
         if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
                 reason="Not carrying a mold"
             )
         
-        mold = self.context.current_well
+        # Validate deck is available
+        if self.context.deck is None:
+            return MoveValidationResult(
+                valid=False,
+                reason="Deck not configured"
+            )
         
         # Execute the move
         try:
             self._executor.execute_place_mold_in_well(
-                mold=mold,
-                tamper_axis=manipulator_config.get('tamper_axis', 'V'),
-                tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0),
-                safe_z=manipulator_config.get('safe_z', 195.0)
+                well_id=well_id,
+                deck=self.context.deck,
+                tamper_axis=manipulator_config.get('tamper_axis', 'V') if manipulator_config else 'V',
+                tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0) if manipulator_config else 30.0,
+                safe_z=manipulator_config.get('safe_z', 195.0) if manipulator_config else 195.0
             )
             # Update state machine state
             self.context.current_well = None
@@ -665,10 +706,15 @@ class MotionPlatformStateMachine(StateMachine):
     
     def validated_place_mold_on_scale(
         self,
-        scale,
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
         """Validate and execute placing mold on scale."""
+        if self.context.scale is None:
+            return MoveValidationResult(
+                valid=False,
+                reason="Scale not configured"
+            )
+        
         if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
@@ -692,7 +738,6 @@ class MotionPlatformStateMachine(StateMachine):
         # Execute the move
         try:
             self._executor.execute_place_mold_on_scale(
-                scale=scale,
                 tamper_axis=manipulator_config.get('tamper_axis', 'V'),
                 tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0)
             )
@@ -707,10 +752,15 @@ class MotionPlatformStateMachine(StateMachine):
     
     def validated_pick_mold_from_scale(
         self,
-        scale,
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
         """Validate and execute picking mold from scale."""
+        if self.context.scale is None:
+            return MoveValidationResult(
+                valid=False,
+                reason="Scale not configured"
+            )
+        
         if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
@@ -726,7 +776,6 @@ class MotionPlatformStateMachine(StateMachine):
         # Execute the move
         try:
             self._executor.execute_pick_mold_from_scale(
-                scale=scale,
                 tamper_axis=manipulator_config.get('tamper_axis', 'V'),
                 tamper_travel_pos=manipulator_config.get('tamper_travel_pos', 30.0)
             )
@@ -788,10 +837,15 @@ class MotionPlatformStateMachine(StateMachine):
     
     def validated_tamp(
         self,
-        scale,
         manipulator_config: Dict[str, object]
     ) -> MoveValidationResult:
         """Validate and execute tamping action."""
+        if self.context.scale is None:
+            return MoveValidationResult(
+                valid=False,
+                reason="Scale not configured"
+            )
+        
         if self.context.current_well is None:
             return MoveValidationResult(
                 valid=False,
@@ -814,7 +868,6 @@ class MotionPlatformStateMachine(StateMachine):
         # Execute the move
         try:
             self._executor.execute_tamp(
-                scale=scale,
                 tamper_axis=manipulator_config.get('tamper_axis', 'V')
             )
             return MoveValidationResult(valid=True)
@@ -886,6 +939,18 @@ class MotionPlatformStateMachine(StateMachine):
                 valid=False,
                 reason="Already executing a move. Wait for current move to complete."
             )
+        
+        # Step 1.5: Verify all axes are homed (exempt homing actions)
+        homing_actions = {'home_all', 'home_manipulator', 'home_trickler', 'home_xyz'}
+        if action_id not in homing_actions:
+            axes_homed = self._executor.get_machine_axes_homed()
+            axis_names = ['X', 'Y', 'Z', 'U', 'V']
+            not_homed = [axis_names[i] for i in range(len(axes_homed)) if i < len(axis_names) and not axes_homed[i]]
+            if not_homed:
+                return MoveValidationResult(
+                    valid=False,
+                    reason=f"All axes must be homed before performing moves/actions. Unhomed axes: {', '.join(not_homed)}"
+                )
         
         # Route to appropriate validation based on whether it's a movement or action
         if target_position_id is not None:
@@ -1136,30 +1201,27 @@ class MotionPlatformStateMachine(StateMachine):
     
     def validated_move_to_well(
         self,
-        well_id: str,
-        deck=None,
-        scale=None,
-        well: Optional[object] = None
+        well_id: str
     ) -> MoveValidationResult:
         """
         Validate and execute movement to a specific well.
         
         Args:
             well_id: Well identifier (e.g., "A1")
-            deck: Optional deck object (uses state machine's deck if not provided)
-            scale: Optional scale instance (for validation)
-            well: Optional WeightWell object - if provided, uses well.ready_pos for position
             
         Returns:
             MoveValidationResult with outcome
         """
-        # Use state machine's deck if not provided
+        # Use state machine's deck
+        deck = self.context.deck
         if deck is None:
-            deck = self.context.deck
+            return MoveValidationResult(
+                valid=False,
+                reason="Deck not configured"
+            )
         
-        # Get well from state machine's deck if not provided
-        if well is None:
-            well = self.get_well_from_deck(well_id)
+        # Get well from state machine's deck
+        well = self.get_well_from_deck(well_id)
         
         # Determine target position from well's ready_pos if available, otherwise construct from well_id
         if well and hasattr(well, 'ready_pos') and well.ready_pos:
@@ -1176,27 +1238,27 @@ class MotionPlatformStateMachine(StateMachine):
             target_position_id=target_position,
             execution_func=self._executor.execute_move_to_well_by_id,
             well_id=well_id,
-            deck=deck,
-            scale=scale
+            deck=deck
         )
     
     def validated_move_to_scale(
-        self,
-        scale
+        self
     ) -> MoveValidationResult:
         """
         Validate and execute movement to the scale.
         
-        Args:
-            scale: Scale instance with position information
-            
         Returns:
             MoveValidationResult with outcome
         """
+        if self.context.scale is None:
+            return MoveValidationResult(
+                valid=False,
+                reason="Scale not configured"
+            )
+        
         return self._validate_and_execute_move(
             target_position_id="SCALE_READY",
-            execution_func=self._executor.execute_move_to_scale_location,
-            scale=scale
+            execution_func=self._executor.execute_move_to_scale_location
         )
     
     def validated_move_to_dispenser(
@@ -1364,6 +1426,10 @@ class MotionPlatformStateMachine(StateMachine):
         picked up and mold_transfer_safe z_height. Returns to global_ready position.
         Only manipulator tool is currently supported.
         
+        Note: The machine's pickup_tool() method is decorated with @requires_safe_z,
+        which automatically raises the bed height to deck.safe_z + 20 if it is not
+        already at that height.
+        
         Args:
             tool: The Tool object to pick up (must be manipulator)
             
@@ -1406,6 +1472,10 @@ class MotionPlatformStateMachine(StateMachine):
         
         Valid from global_ready position. Requires manipulator tool to be active.
         Returns to global_ready position.
+        
+        Note: The machine's park_tool() method is decorated with @requires_safe_z,
+        which automatically raises the bed height to deck.safe_z + 20 if it is not
+        already at that height.
         
         Returns:
             MoveValidationResult with outcome

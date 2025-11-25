@@ -8,10 +8,6 @@ MotionPlatformStateMachine.
 The executor is owned by the state machine and is not accessed directly by other
 components, so all movements go through validation.
 """
-
-# TODO: Using machine.move_to invokes @requires_safe_z and @requires_homed. What behavior might result
-# if the function is called when these conditions aren't true (if this is even possible with the state machine?)
-
 from typing import Optional
 from science_jubilee.Machine import Machine
 from Scale import Scale
@@ -28,25 +24,31 @@ class MovementExecutor:
     owned by MotionPlatformStateMachine and accessed through validated methods.
     """
     
-    def __init__(self, machine: Machine):
+    def __init__(self, machine: Machine, scale: Optional[Scale] = None):
         """
         Initialize the movement executor with a machine reference.
         
         Args:
             machine: The Jubilee Machine instance to control
+            scale: Optional Scale instance (reference to JubileeManager's scale)
         """
         self._machine = machine
+        self._scale = scale
     
     @property
     def machine(self) -> Machine:
-        """Read-only access to machine for state queries only. (Should not modify platform state)"""
+        """
+        Read-only access to machine for state queries only. 
+        Queries should not modify platform state.
+        """
         return self._machine
     
     # ===== MANIPULATOR MOVEMENTS =====
     
     def execute_pick_mold_from_well(
         self,
-        mold: WeightWell,
+        well_id: str,
+        deck,
         tamper_axis: str = 'V',
         tamper_travel_pos: float = 30.0,
         safe_z: float = 195.0
@@ -54,16 +56,43 @@ class MovementExecutor:
         """
         Execute the physical movements to pick up a mold from a well.
         
-        Assumes the toolhead is directly above the chosen well at safe_z height
+        Assumes the toolhead is above the chosen well at safe_z height
         with tamper axis in travel position.
         
         Args:
-            mold: The WeightWell object to pick up
+            well_id: Well identifier (e.g., "A1")
+            deck: The Deck object with well configuration
             tamper_axis: Axis letter for tamper (default 'V')
             tamper_travel_pos: Travel position for tamper axis (default 30.0 mm)
             safe_z: Safe Z height (default 195.0 mm)
         """
-        print(f"Picking up mold: {mold.name if hasattr(mold, 'name') else 'unnamed'}")
+        # Get well from deck for logging
+        well = None
+        try:
+            # Convert well_id to slot index
+            row = ord(well_id[0].upper()) - ord('A')
+            col = int(well_id[1:]) - 1
+            
+            if row == 0:  # Row A: slots 0-6
+                slot_index = col
+            elif row == 1:  # Row B: slots 7-13
+                slot_index = 7 + col
+            elif row == 2:  # Row C: slots 14-17
+                slot_index = 14 + col
+            else:
+                slot_index = None
+            
+            if slot_index is not None and str(slot_index) in deck.slots:
+                slot = deck.slots[str(slot_index)]
+                if slot.has_labware and hasattr(slot.labware, 'wells'):
+                    for w in slot.labware.wells.values():
+                        well = w
+                        break
+        except Exception:
+            pass
+        
+        well_name = well.name if (well and hasattr(well, 'name')) else well_id
+        print(f"Picking up mold: {well_name}")
         
         self._machine._set_absolute_positioning()
         self._machine.move(z=148, s=500)  # Move until tamper leadscrew almost grounded
@@ -77,7 +106,8 @@ class MovementExecutor:
     
     def execute_place_mold_in_well(
         self,
-        mold: WeightWell,
+        well_id: str,
+        deck,
         tamper_axis: str = 'V',
         tamper_travel_pos: float = 30.0,
         safe_z: float = 195.0
@@ -86,12 +116,39 @@ class MovementExecutor:
         Execute the physical movements to place a mold in a well.
         
         Args:
-            mold: The WeightWell object being placed
+            well_id: Well identifier (e.g., "A1")
+            deck: The Deck object with well configuration
             tamper_axis: Axis letter for tamper (default 'V')
             tamper_travel_pos: Travel position for tamper axis (default 30.0 mm)
             safe_z: Safe Z height (default 195.0 mm)
         """
-        print(f"Placing mold: {mold.name if hasattr(mold, 'name') else 'unnamed'}")
+        # Get well from deck for logging
+        well = None
+        try:
+            # Convert well_id to slot index
+            row = ord(well_id[0].upper()) - ord('A')
+            col = int(well_id[1:]) - 1
+            
+            if row == 0:  # Row A: slots 0-6
+                slot_index = col
+            elif row == 1:  # Row B: slots 7-13
+                slot_index = 7 + col
+            elif row == 2:  # Row C: slots 14-17
+                slot_index = 14 + col
+            else:
+                slot_index = None
+            
+            if slot_index is not None and str(slot_index) in deck.slots:
+                slot = deck.slots[str(slot_index)]
+                if slot.has_labware and hasattr(slot.labware, 'wells'):
+                    for w in slot.labware.wells.values():
+                        well = w
+                        break
+        except Exception:
+            pass
+        
+        well_name = well.name if (well and hasattr(well, 'name')) else well_id
+        print(f"Placing mold: {well_name}")
         
         self._machine._set_absolute_positioning()
         self._machine.move(z=148, s=500)  # Move until tamper leadscrew almost grounded
@@ -103,7 +160,6 @@ class MovementExecutor:
     
     def execute_place_mold_on_scale(
         self,
-        scale: Scale,
         tamper_axis: str = 'V',
         tamper_travel_pos: float = 30.0
     ) -> None:
@@ -114,10 +170,12 @@ class MovementExecutor:
         above the cap dispenser.
         
         Args:
-            scale: The Scale instance with position information
             tamper_axis: Axis letter for tamper (default 'V')
             tamper_travel_pos: Travel position for tamper axis (default 30.0 mm)
         """
+        if self._scale is None:
+            raise RuntimeError("Scale not configured in MovementExecutor")
+        
         print("Placing mold on scale")
         
         self._machine._set_absolute_positioning()
@@ -128,7 +186,6 @@ class MovementExecutor:
     
     def execute_pick_mold_from_scale(
         self,
-        scale: Scale,
         tamper_axis: str = 'V',
         tamper_travel_pos: float = 30.0
     ) -> None:
@@ -138,15 +195,17 @@ class MovementExecutor:
         Only call if a mold has been placed under the trickler.
         
         Args:
-            scale: The Scale instance with position information
             tamper_axis: Axis letter for tamper (default 'V')
             tamper_travel_pos: Travel position for tamper axis (default 30.0 mm)
         """
+        if self._scale is None:
+            raise RuntimeError("Scale not configured in MovementExecutor")
+        
         print("Picking mold from scale")
         
         self._machine._set_absolute_positioning()
         self._machine.move_to(v=38.5, s=50)  # Pick up mold
-        self._machine.move(y=scale.y, s=500)  # Move from under trickler
+        self._machine.move(y=self._scale.y, s=500)  # Move from under trickler
         self._machine.safe_z_movement()  # Move to safe z
         self._machine.move_to(v=tamper_travel_pos, s=50)  # Move to travel position
     
@@ -179,21 +238,22 @@ class MovementExecutor:
     
     def execute_tamp(
         self,
-        scale: Scale,
         tamper_axis: str = 'V'
     ) -> None:
         """
         Execute tamping movements.
         
         Args:
-            scale: The Scale instance with position information
             tamper_axis: Axis letter for tamper (default 'V')
         """
+        if self._scale is None:
+            raise RuntimeError("Scale not configured in MovementExecutor")
+        
         print("Executing tamp")
         
         self._machine._set_absolute_positioning()
         self._machine.move_to(v=38.5, s=50)  # Prepare for tamp
-        self._machine.move(y=scale.y, s=50)  # Move from under trickler
+        self._machine.move(y=self._scale.y, s=50)  # Move from under trickler
         self._machine.move_to(v=0, s=50)  # Move until stall detection stops movement
     
     # ===== BASIC MOVEMENTS =====
@@ -257,6 +317,10 @@ class MovementExecutor:
         """
         Pick up a tool and move to global_ready position.
         
+        Note: The machine's pickup_tool() method is decorated with @requires_safe_z,
+        which automatically raises the bed height to deck.safe_z + 20 if it is not
+        already at that height.
+        
         Args:
             tool: The Tool object to pick up (must be manipulator for now)
             registry: PositionRegistry to get global_ready coordinates
@@ -307,6 +371,10 @@ class MovementExecutor:
     ) -> bool:
         """
         Park the current tool and move to global_ready position.
+        
+        Note: The machine's park_tool() method is decorated with @requires_safe_z,
+        which automatically raises the bed height to deck.safe_z + 20 if it is not
+        already at that height. 
         
         Args:
             registry: PositionRegistry to get global_ready coordinates
@@ -366,17 +434,16 @@ class MovementExecutor:
         self._machine.move_to(x=well.x, y=well.y)
     
     def execute_move_to_scale(
-        self,
-        scale: Scale
+        self
     ) -> None:
         """
         Execute movement to the scale location.
-        
-        Args:
-            scale: The Scale instance with position information
         """
+        if self._scale is None:
+            raise RuntimeError("Scale not configured in MovementExecutor")
+        
         self._machine.safe_z_movement()
-        self._machine.move_to(x=scale.x, y=scale.y)
+        self._machine.move_to(x=self._scale.x, y=self._scale.y)
     
     def get_machine_position(self) -> dict:
         """Get current machine position."""
@@ -389,8 +456,7 @@ class MovementExecutor:
     def execute_move_to_well_by_id(
         self,
         well_id: str,
-        deck,
-        scale
+        deck
     ) -> bool:
         """
         Move to a specific well by well ID.
@@ -399,8 +465,7 @@ class MovementExecutor:
         
         Args:
             well_id: Well identifier (e.g., "A1")
-            deck: The Deck object with well configuration
-            scale: The Scale instance
+            deck: The Deck object with well configuration (from state machine's context)
             
         Returns:
             True if successful, False otherwise
@@ -444,23 +509,22 @@ class MovementExecutor:
             return False
     
     def execute_move_to_scale_location(
-        self,
-        scale
+        self
     ) -> bool:
         """
         Move to the scale location.
         
         Moved from JubileeManager._move_to_scale()
         
-        Args:
-            scale: The Scale instance with position information
-            
         Returns:
             True if successful, False otherwise
         """
         try:
+            if self._scale is None:
+                raise RuntimeError("Scale not configured in MovementExecutor")
+            
             self._machine.safe_z_movement()
-            self._machine.move_to(x=scale.x, y=scale.y)
+            self._machine.move_to(x=self._scale.x, y=self._scale.y)
             # TODO: Figure out appropriate z offset from scale location to move to
             return True
         except Exception as e:
@@ -566,117 +630,3 @@ class MovementExecutor:
             print(f"Error homing trickler: {e}")
             return False
 
-    def pick_mold(self, mold: WeightWell):
-        """
-        Pick up mold from well.
-        
-        Assumes toolhead is directly above the well at safe_z height with tamper axis in travel position.
-        Validates move through state machine before execution.
-        """
-        if not self.state_machine:
-            raise RuntimeError("State machine not configured")
-        
-        # Call state machine method which validates and executes
-        result = self.state_machine.validated_pick_mold_from_well(
-            mold=mold,
-            manipulator_config=self._get_config_dict()
-        )
-        
-        if not result.valid:
-            raise ToolStateError(f"Cannot pick mold: {result.reason}")
-        
-        # Update local state after successful execution
-        self.current_well = mold
-
-    def place_well(self) -> WeightWell:
-        """
-        Place down the current mold and return it.
-        
-        Assumes toolhead is directly above the well at safe_z height with tamper axis in travel position.
-        Validates move through state machine before execution.
-        """
-        if not self.state_machine:
-            raise RuntimeError("State machine not configured")
-        
-        mold_to_place = self.current_well
-        
-        # Call state machine method which validates and executes
-        result = self.state_machine.validated_place_mold_in_well(
-            manipulator_config=self._get_config_dict()
-        )
-        
-        if not result.valid:
-            raise ToolStateError(f"Cannot place mold: {result.reason}")
-        
-        # Update local state after successful execution
-        self.current_well = None
-        return mold_to_place
-
-    def place_top_piston(self, piston_dispenser: PistonDispenser):
-        """
-        Place the top piston on the current mold. Only allowed if carrying a mold without a top piston.
-        
-        Assumes toolhead is at dispenser position.
-        Validates move through state machine before execution.
-        """
-        if not self.state_machine:
-            raise RuntimeError("State machine not configured")
-        
-        # Call state machine method which validates and executes
-        result = self.state_machine.validated_place_top_piston(
-            piston_dispenser=piston_dispenser,
-            manipulator_config=self._get_config_dict()
-        )
-        
-        if not result.valid:
-            raise ToolStateError(f"Cannot place top piston: {result.reason}")
-        
-        # Update local state after successful execution
-        if self.current_well:
-            self.current_well.has_top_piston = True
-        
-        return True
-
-    def place_well_on_scale(self, scale: Scale):
-        """
-        Place the current mold on the scale. Only allowed if carrying a mold without a top piston.
-        
-        Validates move through state machine before execution.
-        """
-        if not self.state_machine:
-            raise RuntimeError("State machine not configured")
-        
-        # Call state machine method which validates and executes
-        result = self.state_machine.validated_place_mold_on_scale(
-            scale=scale,
-            manipulator_config=self._get_config_dict()
-        )
-        
-        if not result.valid:
-            raise ToolStateError(f"Cannot place mold on scale: {result.reason}")
-        
-        # Update local state after successful execution
-        self.placed_well_on_scale = True
-        return True
-
-    def pick_well_from_scale(self, scale: Scale):
-        """
-        Pick up the current mold from the scale. Only allowed if carrying a mold without a top piston.
-        
-        Validates move through state machine before execution.
-        """
-        if not self.state_machine:
-            raise RuntimeError("State machine not configured")
-        
-        # Call state machine method which validates and executes
-        result = self.state_machine.validated_pick_mold_from_scale(
-            scale=scale,
-            manipulator_config=self._get_config_dict()
-        )
-        
-        if not result.valid:
-            raise ToolStateError(f"Cannot pick mold from scale: {result.reason}")
-        
-        # Update local state after successful execution
-        self.placed_well_on_scale = False
-        return True

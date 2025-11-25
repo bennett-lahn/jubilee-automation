@@ -14,6 +14,7 @@ from pathlib import Path
 
 # Import Jubilee components
 from science_jubilee.Machine import Machine
+from science_jubilee.decks.Deck import Deck
 from Trickler import Trickler
 from Scale import Scale
 from PistonDispenser import PistonDispenser
@@ -87,7 +88,11 @@ class JubileeManager:
             real_machine = Machine(address=machine_address)
             real_machine.connect()
             
-            # Initialize the state machine with the real machine
+            # Connect to scale first (needed for state machine initialization)
+            self.scale = Scale(port=scale_port)
+            self.scale.connect()
+            
+            # Initialize the state machine with the real machine and scale
             # The state machine owns the machine and controls all access to it
             config_path = Path(state_machine_config)
             if not config_path.exists():
@@ -95,7 +100,8 @@ class JubileeManager:
             
             self.state_machine = MotionPlatformStateMachine.from_config_file(
                 config_path,
-                real_machine
+                real_machine,
+                scale=self.scale
             )
             
             # Initialize deck and dispensers in state machine
@@ -104,10 +110,6 @@ class JubileeManager:
                 num_piston_dispensers=self._num_piston_dispensers,
                 num_pistons_per_dispenser=self._num_pistons_per_dispenser
             )
-            
-            # Connect to scale
-            self.scale = Scale(port=scale_port)
-            self.scale.connect()
 
             # Create manipulator with state machine reference
             self.manipulator = Manipulator(
@@ -117,10 +119,6 @@ class JubileeManager:
                 config="manipulator_config"
             )
 
-            # Initialize trickler (assuming it's already loaded)
-            # This would need to be configured based on your setup
-            # self.trickler = Trickler(index=0, name="trickler", config="trickler_config", scale=self.scale)
-            
             # Ensure state machine context is set correctly for homing
             self.state_machine.update_context(
                 active_tool_id=None,
@@ -135,7 +133,7 @@ class JubileeManager:
                 raise RuntimeError(f"Failed to home all axes: {result.reason}")
             
             # Load the manipulator tool (this registers it but doesn't pick it up)
-            self.machine_read_only.load(self.manipulator)
+            self.machine_read_only.load_tool(self.manipulator)
             
             # Pick up the tool through state machine
             # This validates we're at a valid position, picks up the tool, and moves to global_ready
@@ -165,22 +163,29 @@ class JubileeManager:
             self.scale.disconnect()
         self.connected = False
     
-    def get_current_weight(self) -> float:
-        """Get current weight from scale"""
+    def get_weight_stable(self) -> float:
+        """Get current weight from scale when stabilized"""
         if self.scale and self.scale.is_connected:
             try:
-                return self.scale.get_weight()
+                return self.scale.get_weight(stable=True)
+            except:
+                return 0.0
+        return 0.0
+
+    def get_weight_unstable(self) -> float:
+        """Get instantaneous weight from scale"""
+        if self.scale and self.scale.is_connected:
+            try:
+                return self.scale.get_weight(stable=False)
             except:
                 return 0.0
         return 0.0
     
     def dispense_to_well(self, well_id: str, target_weight: float) -> bool:
         """Dispense powder to a specific well"""
-        if not self.connected or not self.trickler:
+        if not self.connected:
             return False
-        
         try:
-
             if not self.manipulator:
                 raise ToolStateError("Manipulator is not connected or provided.")
             
@@ -190,21 +195,12 @@ class JubileeManager:
             if not self.state_machine:
                 raise RuntimeError("State machine not configured")
             
-            well = self.state_machine.get_well_from_deck(well_id)
-            if not well:
-                raise ToolStateError(f"Well {well_id} not found in deck.")
-            if not well.valid:
-                raise ToolStateError("Well is not valid.")
-            if well.has_top_piston:
-                raise ToolStateError("Well already has a top piston. Cannot dispense.")
-            
-            # TODO: Move this logic to state machine / movement executor
             self._move_to_well(well_id)
-            self.manipulator.pick_mold(well)
+            self.manipulator.pick_mold(well_id)
             self._move_to_scale()
-            self.manipulator.place_well_on_scale(self.scale)
+            self.manipulator.place_well_on_scale()
             self._dispense_powder(target_weight)
-            self.manipulator.pick_well_from_scale(self.scale)
+            self.manipulator.pick_well_from_scale()
             dispenser_index = -1
             for dispenser in self.piston_dispensers:
                 if dispenser.num_pistons > 0:
@@ -212,20 +208,23 @@ class JubileeManager:
                     break
             if dispenser_index == -1:
                 raise ToolStateError("No dispenser with pistons found.")
-            self.get_piston_from_dispenser(dispenser_index, well_id)
+            self._move_to_dispenser(dispenser_index)
+            self.get_piston_from_dispenser(dispenser_index)
             self._move_to_well(well_id)
-            self.manipulator.place_well()
+            self.manipulator.place_well(well_id)
             return True
         except Exception as e:
             print(f"Dispensing error: {e}")
             return False
 
-    def get_piston_from_dispenser(self, dispenser_index: int, well_id: str):
+    def _move_to_dispenser(self, dispenser_index: int):
         """
-        Get the top piston from a specific dispenser.
+        Move to the dispenser ready position for a specific dispenser.
         
         Validates and executes through MotionPlatformStateMachine.
-        Requires being at the dispenser ready position for that dispenser.
+        
+        Args:
+            dispenser_index: Index of the dispenser (0, 1, etc.)
         """
         if not self.connected or not self.piston_dispensers:
             return False
@@ -233,23 +232,49 @@ class JubileeManager:
         if not self.state_machine:
             raise RuntimeError("State machine not configured")
         
-        if self.manipulator.current_well is None:
-            raise ToolStateError("No mold to place piston into.")
+        if dispenser_index >= len(self.piston_dispensers):
+            raise ValueError(f"Invalid dispenser index: {dispenser_index}")
         
         try:
             piston_dispenser = self.piston_dispensers[dispenser_index]
             
-            # Move to dispenser ready position if not already there
-            target_position = f"dispenser_ready_{dispenser_index}"
-            if self.state_machine.context.position_id != target_position:
-                # Move to dispenser position through state machine
-                result = self.state_machine.validated_move_to_dispenser(
-                    dispenser_index=dispenser_index,
-                    dispenser_x=piston_dispenser.x,
-                    dispenser_y=piston_dispenser.y
-                )
-                if not result.valid:
-                    raise RuntimeError(f"Failed to move to dispenser position: {result.reason}")
+            # Move to dispenser position through state machine
+            result = self.state_machine.validated_move_to_dispenser(
+                dispenser_index=dispenser_index,
+                dispenser_x=piston_dispenser.x,
+                dispenser_y=piston_dispenser.y
+            )
+            
+            if not result.valid:
+                raise RuntimeError(f"Failed to move to dispenser position: {result.reason}")
+            
+            return True
+        except Exception as e:
+            print(f"Error moving to dispenser: {e}")
+            return False
+
+    def get_piston_from_dispenser(self, dispenser_index: int):
+        """
+        Get the top piston from a specific dispenser.
+        
+        Validates and executes through MotionPlatformStateMachine.
+        Requires being at the dispenser ready position for that dispenser.
+        Call _move_to_dispenser() first to move to the correct position.
+        
+        Args:
+            dispenser_index: Index of the dispenser (0, 1, etc.)
+        """
+        if not self.connected or not self.piston_dispensers:
+            return False
+        
+        if not self.state_machine:
+            raise RuntimeError("State machine not configured")
+        
+        if dispenser_index >= len(self.piston_dispensers):
+            raise ValueError(f"Invalid dispenser index: {dispenser_index}")
+        
+        try:
+            piston_dispenser = self.piston_dispensers[dispenser_index]
             
             # Retrieve piston through state machine
             result = self.state_machine.validated_retrieve_piston(
@@ -259,7 +284,6 @@ class JubileeManager:
             
             if not result.valid:
                 raise RuntimeError(f"Failed to retrieve piston: {result.reason}")
-            
             
             return True
         except Exception as e:
@@ -276,14 +300,9 @@ class JubileeManager:
         if not self.state_machine:
             raise RuntimeError("State machine not configured")
         
-        well = self.state_machine.get_well_from_deck(well_id)
-        
         result = self.state_machine.validated_move_to_well(
-            well_id=well_id,
-            scale=self.scale,
-            well=well  # Pass well object so validated_move_to_well can use ready_pos
+            well_id=well_id
         )
-        
         if not result.valid:
             raise RuntimeError(f"Move to well failed: {result.reason}")
         
@@ -301,9 +320,7 @@ class JubileeManager:
         if not self.scale:
             return False
         
-        result = self.state_machine.validated_move_to_scale(
-            scale=self.scale
-        )
+        result = self.state_machine.validated_move_to_scale()
         
         if not result.valid:
             raise RuntimeError(f"Move to scale failed: {result.reason}")

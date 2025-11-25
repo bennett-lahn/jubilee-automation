@@ -4,7 +4,6 @@ from science_jubilee.tools.Tool import (
     ToolStateError,
 )
 from trickler_labware import WeightWell
-from Scale import Scale
 import PistonDispenser
 import time
 from typing import List, Optional, Dict, Any
@@ -239,12 +238,11 @@ class Manipulator(Tool):
     # TODO: Figure out how to merge stall detection with this function so that we can handle stall detection gracefully
     @requires_carrying_mold
     @requires_mold_without_piston
-    def tamp(self, scale: Scale, target_depth: float = None):
+    def tamp(self, target_depth: float = None):
         """
         Perform tamping action. Only allowed if carrying a mold without a cap.
         
         Args:
-            scale: The Scale instance with position information
             target_depth: Target depth to tamp to (mm). If None, uses default depth.
         """
         if not self.state_machine:
@@ -255,7 +253,6 @@ class Manipulator(Tool):
         
         # Call state machine method which validates and executes
         result = self.state_machine.validated_tamp(
-            scale=scale,
             manipulator_config=self._get_config_dict()
         )
         
@@ -321,35 +318,45 @@ class Manipulator(Tool):
         """
         return self.current_well is not None
 
-    def pick_mold(self, mold: WeightWell):
+    def pick_mold(self, well_id: str):
         """
         Pick up mold from well.
         
         Assumes toolhead is directly above the well at safe_z height with tamper axis in travel position.
         Validates move through state machine before execution.
+        
+        Args:
+            well_id: Well identifier (e.g., "A1")
         """
         if not self.state_machine:
             raise RuntimeError("State machine not configured")
         result = self.state_machine.validated_pick_mold_from_well(
-            mold=mold,
+            well_id=well_id,
             manipulator_config=self._get_config_dict()
         )
         
         if not result.valid:
             raise ToolStateError(f"Cannot pick mold: {result.reason}")
 
-    def place_well(self) -> WeightWell:
+    def place_well(self, well_id: str) -> Optional[WeightWell]:
         """
         Place down the current mold and return it.
         
         Assumes toolhead is directly above the well at safe_z height with tamper axis in travel position.
         Validates move through state machine before execution.
+        
+        Args:
+            well_id: Well identifier (e.g., "A1")
+        
+        Returns:
+            The WeightWell object that was placed, or None if no mold was being carried
         """
         if not self.state_machine:
             raise RuntimeError("State machine not configured")
         
         mold_to_place = self.current_well
         result = self.state_machine.validated_place_mold_in_well(
+            well_id=well_id,
             manipulator_config=self._get_config_dict()
         )
         
@@ -379,7 +386,7 @@ class Manipulator(Tool):
         
         return True
 
-    def place_well_on_scale(self, scale: Scale):
+    def place_well_on_scale(self):
         """
         Place the current mold on the scale. Only allowed if carrying a mold without a top piston.
         
@@ -390,7 +397,6 @@ class Manipulator(Tool):
         
         # Call state machine method which validates and executes
         result = self.state_machine.validated_place_mold_on_scale(
-            scale=scale,
             manipulator_config=self._get_config_dict()
         )
         
@@ -399,7 +405,7 @@ class Manipulator(Tool):
         
         return True
 
-    def pick_well_from_scale(self, scale: Scale):
+    def pick_well_from_scale(self):
         """
         Pick up the current mold from the scale. Only allowed if carrying a mold without a top piston.
         
@@ -410,7 +416,6 @@ class Manipulator(Tool):
         
         # Call state machine method which validates and executes
         result = self.state_machine.validated_pick_mold_from_scale(
-            scale=scale,
             manipulator_config=self._get_config_dict()
         )
         
