@@ -15,7 +15,6 @@ from pathlib import Path
 # Import Jubilee components
 from science_jubilee.Machine import Machine
 from science_jubilee.decks.Deck import Deck
-from Trickler import Trickler
 from Scale import Scale
 from PistonDispenser import PistonDispenser
 from Manipulator import Manipulator, ToolStateError
