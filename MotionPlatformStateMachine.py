@@ -10,7 +10,7 @@ from statemachine import State, StateMachine
 from science_jubilee.Machine import Machine
 from science_jubilee.decks.Deck import Deck
 from PistonDispenser import PistonDispenser
-from MovementExecutor import MovementExecutor
+from MovementExecutor import MovementExecutor, FeedRate
 from Scale import Scale
 
 
@@ -407,7 +407,7 @@ class MotionPlatformStateMachine(StateMachine):
     disengage_tool = tool_engaged.to(idle)
     abort_motion = moving.to(idle)
 
-    def __init__(self, registry: PositionRegistry, machine: Machine, *, context: Optional[MotionContext] = None, scale: Optional[Scale] = None) -> None:
+    def __init__(self, registry: PositionRegistry, machine: Machine, *, context: Optional[MotionContext] = None, scale: Optional[Scale] = None, feedrate: FeedRate = FeedRate.MEDIUM) -> None:
         self._registry = registry
         self._actions = registry.actions
         
@@ -424,7 +424,7 @@ class MotionPlatformStateMachine(StateMachine):
                 context.scale = scale
 
         self.context = context
-        self._executor = MovementExecutor(machine, scale=scale)
+        self._executor = MovementExecutor(machine, scale=scale, feedrate=feedrate)
         super().__init__()
 
     @classmethod
@@ -435,6 +435,7 @@ class MotionPlatformStateMachine(StateMachine):
         *,
         context_overrides: Optional[Mapping[str, object]] = None,
         scale: Optional[Scale] = None,
+        feedrate: FeedRate = FeedRate.MEDIUM,
     ) -> "MotionPlatformStateMachine":
         registry = PositionRegistry.from_config_file(path)
         initial_descriptor = registry.find_first_of_type(PositionType.GLOBAL_READY)
@@ -459,7 +460,7 @@ class MotionPlatformStateMachine(StateMachine):
             context_kwargs.update(context_overrides)
 
         context = MotionContext(**context_kwargs)
-        return cls(registry, machine, context=context, scale=scale)
+        return cls(registry, machine, context=context, scale=scale, feedrate=feedrate)
 
     # ---------------------------------------------------------------------
     # Platform State Initialization

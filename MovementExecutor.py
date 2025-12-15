@@ -9,11 +9,19 @@ The executor is owned by the state machine and is not accessed directly by other
 components, so all movements go through validation.
 """
 from typing import Optional
+from enum import Enum
 from science_jubilee.Machine import Machine
 from Scale import Scale
 from PistonDispenser import PistonDispenser
 from trickler_labware import WeightWell
 from MotionPlatformStateMachine import PositionType
+
+
+class FeedRate(Enum):
+    """Enumeration for feedrate settings."""
+    FAST = "fast"
+    MEDIUM = "medium"
+    SLOW = "slow"
 
 
 class MovementExecutor:
@@ -24,16 +32,39 @@ class MovementExecutor:
     owned by MotionPlatformStateMachine and accessed through validated methods.
     """
     
-    def __init__(self, machine: Machine, scale: Optional[Scale] = None):
+    # Feedrate constants (in mm/min)
+    FEEDRATE_FAST = 5000
+    FEEDRATE_MEDIUM = 1000
+    FEEDRATE_SLOW = 500
+    
+    def __init__(self, machine: Machine, scale: Optional[Scale] = None, feedrate: FeedRate = FeedRate.MEDIUM):
         """
         Initialize the movement executor with a machine reference.
         
         Args:
             machine: The Jubilee Machine instance to control
             scale: Optional Scale instance (reference to JubileeManager's scale)
+            feedrate: FeedRate enum value to control movement speed (default: MEDIUM)
         """
         self._machine = machine
         self._scale = scale
+        self._feedrate = feedrate
+    
+    def _get_feedrate(self) -> int:
+        """
+        Get the current feedrate value based on the selected FeedRate enum.
+        
+        Returns:
+            Feedrate value in mm/min
+        """
+        if self._feedrate == FeedRate.FAST:
+            return self.FEEDRATE_FAST
+        elif self._feedrate == FeedRate.MEDIUM:
+            return self.FEEDRATE_MEDIUM
+        elif self._feedrate == FeedRate.SLOW:
+            return self.FEEDRATE_SLOW
+        else:
+            return self.FEEDRATE_MEDIUM  # Default fallback
     
     @property
     def machine(self) -> Machine:
@@ -94,13 +125,14 @@ class MovementExecutor:
         well_name = well.name if (well and hasattr(well, 'name')) else well_id
         print(f"Picking up mold: {well_name}")
         
+        feedrate = self._get_feedrate()
         self._machine._set_absolute_positioning()
-        self._machine.move(z=148, s=500)  # Move until tamper leadscrew almost grounded
+        self._machine.move(z=148, s=feedrate)  # Move until tamper leadscrew almost grounded
         self._machine._set_relative_positioning()
-        self._machine.move(y=-25.5, s=500)  # Move to the side of the mold
+        self._machine.move(y=-25.5, s=feedrate)  # Move to the side of the mold
         self._machine.move_to(v=50, s=50)  # Move mold holder down
         self._machine._set_relative_positioning()
-        self._machine.move(y=25.5, s=500)  # Move back under mold
+        self._machine.move(y=25.5, s=feedrate)  # Move back under mold
         self._machine.move_to(v=tamper_travel_pos, s=50)  # Pick up mold and move to travel position
         self._machine.safe_z_movement()  # Move back to safe z
     
@@ -150,11 +182,12 @@ class MovementExecutor:
         well_name = well.name if (well and hasattr(well, 'name')) else well_id
         print(f"Placing mold: {well_name}")
         
+        feedrate = self._get_feedrate()
         self._machine._set_absolute_positioning()
-        self._machine.move(z=148, s=500)  # Move until tamper leadscrew almost grounded
+        self._machine.move(z=148, s=feedrate)  # Move until tamper leadscrew almost grounded
         self._machine.move_to(v=50, s=50)  # Put down mold holder
         self._machine._set_relative_positioning()
-        self._machine.move(y=-25.5, s=500)  # Move out from under mold
+        self._machine.move(y=-25.5, s=feedrate)  # Move out from under mold
         self._machine.move_to(v=tamper_travel_pos, s=50)  # Move into tamper travel position
         self._machine.safe_z_movement()  # Move back to safe z
     
@@ -178,10 +211,11 @@ class MovementExecutor:
         
         print("Placing mold on scale")
         
+        feedrate = self._get_feedrate()
         self._machine._set_absolute_positioning()
-        self._machine.move_to(z=134, s=500)  # Move to 5mm above scale
+        self._machine.move_to(z=134, s=feedrate)  # Move to 5mm above scale
         self._machine.move_to(v=38.5, s=50)  # Move well to fit under trickler
-        self._machine.move(y=184, s=500)  # Move well under trickler
+        self._machine.move(y=184, s=feedrate)  # Move well under trickler
         self._machine.move_to(v=45, s=50)  # Place well on scale
     
     def execute_pick_mold_from_scale(
@@ -203,9 +237,10 @@ class MovementExecutor:
         
         print("Picking mold from scale")
         
+        feedrate = self._get_feedrate()
         self._machine._set_absolute_positioning()
         self._machine.move_to(v=38.5, s=50)  # Pick up mold
-        self._machine.move(y=self._scale.y, s=500)  # Move from under trickler
+        self._machine.move(y=self._scale.y, s=feedrate)  # Move from under trickler
         self._machine.safe_z_movement()  # Move to safe z
         self._machine.move_to(v=tamper_travel_pos, s=50)  # Move to travel position
     
@@ -227,13 +262,14 @@ class MovementExecutor:
         """
         print(f"Placing top piston from dispenser {piston_dispenser.index}")
         
+        feedrate = self._get_feedrate()
         self._machine._set_absolute_positioning()
         self._machine.move_to(v=52, s=50)  # Fully lower mold
-        self._machine.move(z=189, s=500)  # Move so mold fits under cap
+        self._machine.move(z=189, s=feedrate)  # Move so mold fits under cap
         self._machine._set_relative_positioning()
-        self._machine.move(y=35, s=500)  # Move under cap dispenser
+        self._machine.move(y=35, s=feedrate)  # Move under cap dispenser
         self._machine.move_to(v=37.3, s=50)  # Move to pick up cap
-        self._machine.move(x=piston_dispenser.x, y=piston_dispenser.y, s=500)  # Return to start
+        self._machine.move(x=piston_dispenser.x, y=piston_dispenser.y, s=feedrate)  # Return to start
         self._machine.move_to(v=tamper_travel_pos, s=50)  # Move to travel position
     
     def execute_tamp(
@@ -264,7 +300,7 @@ class MovementExecutor:
         y: Optional[float] = None,
         z: Optional[float] = None,
         v: Optional[float] = None,
-        speed: int = 500
+        speed: Optional[int] = None
     ) -> None:
         """
         Execute a basic move to specified coordinates.
@@ -274,8 +310,10 @@ class MovementExecutor:
             y: Y coordinate (None to skip)
             z: Z coordinate (None to skip)
             v: V/manipulator coordinate (None to skip)
-            speed: Movement speed in mm/min (default 500)
+            speed: Movement speed in mm/min (None to use configured feedrate)
         """
+        if speed is None:
+            speed = self._get_feedrate()
         self._machine.move_to(x=x, y=y, z=z, v=v, s=speed)
     
     def execute_safe_z_movement(self) -> None:
@@ -307,7 +345,8 @@ class MovementExecutor:
             v = coords.v if (coords.v is not None and (not isinstance(coords.v, str) or not coords.v.startswith("PLACEHOLDER"))) else None
             
             if x is not None or y is not None or z is not None or v is not None:
-                self._machine.move_to(x=x, y=y, z=z, v=v)
+                feedrate = self._get_feedrate()
+                self._machine.move_to(x=x, y=y, z=z, v=v, s=feedrate)
     
     def execute_pickup_tool(
         self,
@@ -430,8 +469,9 @@ class MovementExecutor:
         Args:
             well: The WeightWell to move to
         """
+        feedrate = self._get_feedrate()
         self._machine.safe_z_movement()
-        self._machine.move_to(x=well.x, y=well.y)
+        self._machine.move_to(x=well.x, y=well.y, s=feedrate)
     
     def execute_move_to_scale(
         self
@@ -442,8 +482,9 @@ class MovementExecutor:
         if self._scale is None:
             raise RuntimeError("Scale not configured in MovementExecutor")
         
+        feedrate = self._get_feedrate()
         self._machine.safe_z_movement()
-        self._machine.move_to(x=self._scale.x, y=self._scale.y)
+        self._machine.move_to(x=self._scale.x, y=self._scale.y, s=feedrate)
     
     def get_machine_position(self) -> dict:
         """Get current machine position."""
@@ -501,8 +542,9 @@ class MovementExecutor:
             if not well or not well.valid:
                 return False
             
+            feedrate = self._get_feedrate()
             self._machine.safe_z_movement()
-            self._machine.move_to(x=well.x, y=well.y)
+            self._machine.move_to(x=well.x, y=well.y, s=feedrate)
             return True
         except Exception as e:
             print(f"Error moving to well: {e}")
@@ -523,8 +565,9 @@ class MovementExecutor:
             if self._scale is None:
                 raise RuntimeError("Scale not configured in MovementExecutor")
             
+            feedrate = self._get_feedrate()
             self._machine.safe_z_movement()
-            self._machine.move_to(x=self._scale.x, y=self._scale.y)
+            self._machine.move_to(x=self._scale.x, y=self._scale.y, s=feedrate)
             # TODO: Figure out appropriate z offset from scale location to move to
             return True
         except Exception as e:

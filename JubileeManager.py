@@ -19,7 +19,10 @@ from Scale import Scale
 from PistonDispenser import PistonDispenser
 from Manipulator import Manipulator, ToolStateError
 from MotionPlatformStateMachine import MotionPlatformStateMachine
+from MovementExecutor import FeedRate
 from ConfigLoader import config
+
+# TODO: Set hard z limit for when tool is engaged so bed doesnt hit leadscrew
 
 class JubileeManager:
     """
@@ -30,7 +33,7 @@ class JubileeManager:
     """
     
     # TODO: make dispensers configurable from UI
-    def __init__(self, num_piston_dispensers: int = 0, num_pistons_per_dispenser: int = 0):
+    def __init__(self, num_piston_dispensers: int = 0, num_pistons_per_dispenser: int = 0, feedrate: FeedRate = FeedRate.MEDIUM):
         self.scale: Optional[Scale] = None
         self.trickler: Optional[Trickler] = None
         self.manipulator: Optional[Manipulator] = None
@@ -38,6 +41,7 @@ class JubileeManager:
         self.connected = False
         self._num_piston_dispensers = num_piston_dispensers
         self._num_pistons_per_dispenser = num_pistons_per_dispenser
+        self._feedrate = feedrate
     
     @property
     def machine_read_only(self) -> Optional[Machine]:
@@ -100,7 +104,8 @@ class JubileeManager:
             self.state_machine = MotionPlatformStateMachine.from_config_file(
                 config_path,
                 real_machine,
-                scale=self.scale
+                scale=self.scale,
+                feedrate=self._feedrate
             )
             
             # Initialize deck and dispensers in state machine

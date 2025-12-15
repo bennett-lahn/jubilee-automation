@@ -121,7 +121,7 @@ M950 S0 C"laser" ; assign GPIO port 0 to LASER/VFD port, servo mode for the tric
 ;-------------------------------------------------------------------------------
 
 ; Allocate a GPIO port on OUT_3 at 100 Hz PWM
-M950 P0 C"out3" Q100      ; P0 = GpOut port 0, C"out4" = use OUT_4, Q100 = 100 Hz
+M950 P0 C"out3" Q20000      ; P0 = GpOut port 0, C"out4" = use OUT_4, Q100 = 100 Hz
 
 ; Endstops and probes 
 ;-------------------------------------------------------------------------------
