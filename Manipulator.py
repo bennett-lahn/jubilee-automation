@@ -138,8 +138,10 @@ class Manipulator(Tool):
     
     # The tamper axis should be returned to this position after any functions that move the tamper complete
     TAMP_AXIS_TRAVEL_POS = 30 # mm
-    DISPENSER_SAFE_Z = 254 # mm, z should be set to this height before moving to cap dispenser ready point or gantry will hit trickler
-    SAFE_Z = 195 # mm
+
+    # TODO: THIS VALUE USED FOR NO DISPENSER TESTING, DO NOT USE WITH DISPENSER
+    DISPENSER_SAFE_Z = 90 # mm, z should be set to this height before moving to cap dispenser ready point or gantry will hit trickler
+    SAFE_Z = 90 # mm
 
     def __init__(self, index, name, state_machine=None, config=None):
         super().__init__(index, name)

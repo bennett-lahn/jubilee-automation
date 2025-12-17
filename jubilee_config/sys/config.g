@@ -71,10 +71,10 @@ M669 K1                   ; CoreXY mode
 ; Kinematic bed ball locations.
 ; Locations are extracted from CAD model assuming lower left build plate corner
 ; is (0, 0) on a 305x305mm plate.
-M671 X297.5:2.5:150 Y313.5:313.5:-16.5 S10 ; Front Left: (297.5, 313.5)
+M671 X297.5:2.5:150 Y313.5:313.5:-16.5 S5  ; Front Left: (297.5, 313.5)
                                            ; Front Right: (2.5, 313.5)
                                            ; Back: (150, -16.5)
-                                           ; Up to 10mm correction
+                                           ; Up to 5mm correction
 
 
 ; Axis and motor configuration 
@@ -140,7 +140,7 @@ G31 K0 X0 Y0 Z-2         ; Set the limit switch as the "Control Point"
 ; Set axis software limits and min/max switch-triggering positions.
 ; Adjusted such that (0,0) lies at the lower left corner of a 300x300mm square 
 ; in the 305mmx305mm build plate.
-M208 X-13.75:313.75 Y-44:341 Z0:295 V0:60
+M208 X-13.75:313.75 Y-44:341 Z0:295 V0:67
 M208 U0:200            ; Set Elastic Lock (U axis) max rotation angle
 M208 W-5000000:5000000 ; Set scale rotational axis to be arbitrarily large. 
 

@@ -8,16 +8,10 @@
 ; M302 P1                  ; Prevent Cold Extrudes, just in case temp setpoints are at 0
 
 G90                        ; Ensure the machine is in absolute mode before issuing movements.
-
-G53 G1 X40.0 F1200       ; Move to the pickup position with tool-0.
-G53 G1 Y318.0 F1200
+G1 Z90                     ; Ensure leadscrew will clear molds when tool is removed
+M208 Z27:Z195              ; Set hard limit so tool won't crash into bed if bad command given(this is bypassed during scale mold movements)
+G1 Y321.5 F300
 M98 P"/macros/tool_lock.g" ; Lock the tool
-G53 G1 Y270.0 F1200        ; Back off the tool post
-
-G1 R2 Z0                   ; Restore prior Z position before tool change was initiated.
-                           ; Note: tool tip position is automatically saved to slot 2 upon the start of a tool change.
-                           ; Restore Z first so we don't crash the tool on retraction.
-G1 R0 Y0                   ; Retract tool by restoring Y position next now accounting for new tool offset.
-                           ; Restoring Y next ensures the tool is fully removed from parking post.
-G1 R0 X0                   ; Restore X position now accounting for new tool offset.
-M106 R2                    ; restore print cooling fan speed
+G1 Y270.0 F300         ; Back off the tool post
+G1 Y80.0 F1200         ; Move back to global ready position in dogleg shape to avoid hitting trickler
+G1 X150.0 F1200

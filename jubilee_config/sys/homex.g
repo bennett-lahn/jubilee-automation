@@ -17,8 +17,9 @@ if !move.axes[1].homed
   M291 R"Cannot Home X" P"Y axis must be homed before x to prevent damage to tool. Press OK to home Y or Cancel to abort" S3
   M98 P"homey.g"
   
-if move.axes[1].userPosition >= 305
-  G0 Y305 F20000       ; Rapid to safe y position
+if move.axes[1].userPosition != 0
+  M291 R"Cannot Home X" P"Y axis must be at Y=0 to prevent collision with back leadscrew. Press OK to *move Y to Y=0* or Cancel to abort" S3
+  G0 Y0 F500            ; Slow move to safe y position to give user time to abort
 
 if state.currentTool != -1
   M84 U
@@ -26,9 +27,10 @@ if state.currentTool != -1
   M98 P"homeu.g"
   
 G91                     ; Relative mode
-G1 H2 Z25 F5000          ; Lower the bed
+G1 H2 Z25 F5000         ; Lower the bed
 G1 X-330 F3000 H1       ; Big negative move to search for endstop
 G1 X4 F600              ; Back off the endstop
 G1 X-10 F600 H1         ; Find endstop again slowly
-G1 H2 Z-25 F5000         ; Raise the bed
+G1 H2 Z-25 F5000        ; Raise the bed
 G90                     ; Set absolute mode
+G1 X0 F5000             ; Move to edge of work space

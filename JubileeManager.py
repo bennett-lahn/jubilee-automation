@@ -35,7 +35,6 @@ class JubileeManager:
     # TODO: make dispensers configurable from UI
     def __init__(self, num_piston_dispensers: int = 0, num_pistons_per_dispenser: int = 0, feedrate: FeedRate = FeedRate.MEDIUM):
         self.scale: Optional[Scale] = None
-        self.trickler: Optional[Trickler] = None
         self.manipulator: Optional[Manipulator] = None
         self.state_machine: Optional[MotionPlatformStateMachine] = None
         self.connected = False

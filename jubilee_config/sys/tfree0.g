@@ -2,17 +2,19 @@
 ; Runs at the start of a toolchange if the current tool is tool-0.
 ; Note: tool offsets are applied at this point unless we preempt commands with G53!
 
-G91                          ; Relative Mode.
-G1 Z2                        ; Pop Z up slightly so we don't crash while traveling over the usable bed region.
-G90                          ; Absolute Mode.
+G1 Z90                       ; Move Z so tool leadscrew is clear of molds. 120 is enough.
+G1 X40.0 F1200               ; Move to the pickup position with tool-0. Follow dog-leg pattern to avoid trickler.
+G1 Y270.0 F1200
 
-G53 G0 X40.0 Y270.0 F3000    ; Rapid to the back of the post. Stay away from the tool rack so we don't collide with tools.
-                             ; This position must be chosen such that the most protruding y face of the current tool
-                             ; (while on the carriage) does not collide with the most protruding y face of any parked tool.
+; G53 G0 X40.0 Y270.0 F300   ; Ready point, kept for reference
 
-G53 G1 Y320.0 F500           ; Controlled move to the park position with tool-1. (park_x, park_y)
+G1 Y322.5 F300               ; Controlled move to the park position with tool-1. (park_x, park_y)
+                             ; This y position is different from picking up the tool because the tool typically
+                             ; does not sit as deep when being replaced
 M98 P"/macros/tool_unlock.g" ; Unlock the tool
-G53 G1 Y280 F500             ; Retract the pin.
-G1 V0                        ; Return tool to 0 position so that it will not try to re-home next time with
+G1 Y270.0 F300               ; Retract the pin.
+G1 V30                       ; Return tool to 30 position so that it will not try to re-home next time with
                              ; the limit switch already engaged. This position should only occur when tamping,
                              ; but better to be safe.
+G1 Y80.0 F1200               ; Return to global ready
+G1 X150.0 F1200           
