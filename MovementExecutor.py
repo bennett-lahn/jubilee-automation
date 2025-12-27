@@ -10,12 +10,11 @@ components, so all movements go through validation.
 """
 import time
 
-from typing import Optional
+from typing import Optional, Union
 from enum import Enum
 from science_jubilee.Machine import Machine
 from Scale import Scale
 from PistonDispenser import PistonDispenser
-from trickler_labware import WeightWell
 from MotionPlatformStateMachine import PositionType
 
 
@@ -35,9 +34,9 @@ class MovementExecutor:
     """
     
     # Feedrate constants (in mm/min)
-    FEEDRATE_FAST = 100
-    FEEDRATE_MEDIUM = 100
-    FEEDRATE_SLOW = 100
+    FEEDRATE_FAST = 700
+    FEEDRATE_MEDIUM = 700
+    FEEDRATE_SLOW = 700
     
     def __init__(self, machine: Machine, scale: Optional[Scale] = None, feedrate: FeedRate = FeedRate.MEDIUM):
         """
@@ -89,7 +88,7 @@ class MovementExecutor:
         ready_y: float = None,
         ready_z: float = None,
         ready_v: float = None
-    ) -> None:
+    ) -> bool:
         """
         Execute the physical movements to pick up a mold from a well.
         
@@ -97,7 +96,7 @@ class MovementExecutor:
         with tamper axis in travel position.
         
         Args:
-            well_id: Well identifier (e.g., "A1")
+            well_id: Well identifier (numerical string "0" through "17")
             deck: The Deck object with well configuration
             tamper_axis: Axis letter for tamper (default 'V')
             tamper_travel_pos: Travel position for tamper axis (default 30.0 mm)
@@ -106,47 +105,43 @@ class MovementExecutor:
             ready_y: Y coordinate of well ready position (required)
             ready_z: Z coordinate of well ready position (required)
             ready_v: V coordinate of well ready position (required)
+        
+        Returns:
+            True if successful, False otherwise.
         """
         # TODO: Update to use variable instead of constant for z=90 safe transfer height
         # Get well from deck for logging
         well = None
         try:
-            # Convert well_id to slot index
-            row = ord(well_id[0].upper()) - ord('A')
-            col = int(well_id[1:]) - 1
+            # Convert well_id to slot index (well_id is already numerical: "0", "1", ... "17")
+            slot_index = int(well_id)
             
-            if row == 0:  # Row A: slots 0-6
-                slot_index = col
-            elif row == 1:  # Row B: slots 7-13
-                slot_index = 7 + col
-            elif row == 2:  # Row C: slots 14-17
-                slot_index = 14 + col
-            else:
-                slot_index = None
-            
-            if slot_index is not None and str(slot_index) in deck.slots:
+            if 0 <= slot_index <= 17 and str(slot_index) in deck.slots:
                 slot = deck.slots[str(slot_index)]
                 if slot.has_labware and hasattr(slot.labware, 'wells'):
-                    for w in slot.labware.wells.values():
-                        well = w
-                        break
+                    if well_id in slot.labware.wells:
+                        well = slot.labware.wells[well_id]
         except Exception:
             pass
         
-        well_name = well.name if (well and hasattr(well, 'name')) else well_id
-        print(f"Picking up mold: {well_name}")
-        
-        feedrate = self._get_feedrate()
-        self._machine.move_to(v=67, s=feedrate)
-        self._machine.move_to(z=27, s=feedrate)
-        self._machine.move(y=23, s=feedrate)
-        self._machine.move_to(v=30, s=feedrate)
-        self._machine.move(y=-23, s=feedrate)
-        self._machine.move_to(z=z_ready, s=feedrate)
+        try:
+            well_name = well.name if (well and hasattr(well, 'name')) else well_id
+            print(f"Picking up mold: {well_name}")
+            
+            feedrate = self._get_feedrate()
+            self._machine.move_to(v=66, s=feedrate)
+            self._machine.move_to(z=40, s=feedrate)
+            self._machine.move(dy=23, s=feedrate)
+            self._machine.move_to(v=30, s=feedrate)
+            self._machine.move(dy=-23, s=feedrate)
+            self._machine.move_to(z=95, s=feedrate)
 
-        # Move back to ready position, if not already there
-        self._machine.move_to(x=ready_x, y=ready_y, z=ready_z, v=ready_v, s=feedrate)
-
+            # Move back to ready position, if not already there
+            self._machine.move_to(x=ready_x, y=ready_y, z=ready_z, v=ready_v, s=feedrate)
+            return True
+        except Exception as e:
+            print(f"Error picking up mold from well {well_id}: {e}")
+            return False
     
     def execute_place_mold_in_well(
         self,
@@ -156,56 +151,53 @@ class MovementExecutor:
         ready_y: float,
         ready_z: float,
         ready_v: float
-    ) -> None:
+    ) -> bool:
         """
         Execute the physical movements to place a mold in a well.
         
         Args:
-            well_id: Well identifier (e.g., "A1")
+            well_id: Well identifier (numerical string "0" through "17")
             deck: The Deck object with well configuration
             ready_x: X coordinate of well ready position (required)
             ready_y: Y coordinate of well ready position (required)
             ready_z: Z coordinate of well ready position (required)
             ready_v: V coordinate of well ready position (required)
+        
+        Returns:
+            True if successful, False otherwise.
         """
         # Get well from deck for logging
         well = None
         try:
-            # Convert well_id to slot index
-            row = ord(well_id[0].upper()) - ord('A')
-            col = int(well_id[1:]) - 1
+            # Convert well_id to slot index (well_id is already numerical: "0", "1", ... "17")
+            slot_index = int(well_id)
             
-            if row == 0:  # Row A: slots 0-6
-                slot_index = col
-            elif row == 1:  # Row B: slots 7-13
-                slot_index = 7 + col
-            elif row == 2:  # Row C: slots 14-17
-                slot_index = 14 + col
-            else:
-                slot_index = None
-            
-            if slot_index is not None and str(slot_index) in deck.slots:
+            if 0 <= slot_index <= 17 and str(slot_index) in deck.slots:
                 slot = deck.slots[str(slot_index)]
                 if slot.has_labware and hasattr(slot.labware, 'wells'):
-                    for w in slot.labware.wells.values():
-                        well = w
-                        break
+                    if well_id in slot.labware.wells:
+                        well = slot.labware.wells[well_id]
         except Exception:
             pass
         
-        well_name = well.name if (well and hasattr(well, 'name')) else well_id
-        print(f"Placing mold: {well_name}")
-        
-        feedrate = self._get_feedrate()
-        self._machine.move_to(v=67, s=feedrate)
-        self._machine.move(y=23, s=feedrate)
-        self._machine.move_to(z=27, s=feedrate)
-        self._machine.move(y=-23, s=feedrate)
-        self._machine.move_to(v=30, s=feedrate)
-        self._machine.move_to(z=ready_z, s=feedrate)
-        
-        # Move back to ready position, if not already there
-        self._machine.move_to(x=ready_x, y=ready_y, z=ready_z, v=ready_v, s=feedrate)
+        try:
+            well_name = well.name if (well and hasattr(well, 'name')) else well_id
+            print(f"Placing mold: {well_name}")
+            
+            feedrate = self._get_feedrate()
+            self._machine.move_to(v=66, s=feedrate)
+            self._machine.move(dy=23, s=feedrate)
+            self._machine.move_to(z=40, s=feedrate)
+            self._machine.move(dy=-23, s=feedrate)
+            self._machine.move_to(v=30, s=feedrate)
+            self._machine.move_to(z=95, s=feedrate)
+            
+            # Move back to ready position, if not already there
+            self._machine.move_to(x=ready_x, y=ready_y, z=ready_z, v=ready_v, s=feedrate)
+            return True
+        except Exception as e:
+            print(f"Error placing mold in well {well_id}: {e}")
+            return False
     
     def execute_place_mold_on_scale(
         self,
@@ -214,7 +206,7 @@ class MovementExecutor:
         ready_y: float = None,
         ready_z: float = None,
         ready_v: float = None
-    ) -> None:
+    ) -> bool:
         """
         Execute movements to place mold on scale.
         
@@ -227,6 +219,9 @@ class MovementExecutor:
             ready_y: Y coordinate of scale ready position (required)
             ready_z: Z coordinate of scale ready position (required)
             ready_v: V coordinate of scale ready position (required)
+        
+        Returns:
+            True if successful, False otherwise.
         """
         # TODO: replace z=90 references with mold transfer height constant
         if self._scale is None:
@@ -234,16 +229,22 @@ class MovementExecutor:
         if self._machine is None:
             raise RuntimeError("Jubilee not configured in MovementExecutor")
         
-        print("Placing mold on scale...")
-        
-        feedrate = self._get_feedrate()
-        self._machine.move(y=38, s=feedrate)     # Move from ready position towards scale
-        self._machine.move_to(v=67, s=feedrate)  # Move well to fit under trickler
-        self._machine.gcode("M208 Z25:195")      # Move bed up so well fits under trickler, relax z-limit to do so
-        self._machine.move_to(z=25, s=feedrate)
-        self._machine.move(y=25, s=feedrate)     # Move well under trickler    
-        self._machine.gcode("M208 Z13:195")      # Move bed up so well is resting on scale, relax z-limit to do so
-        self._machine.move_to(z=13, s=feedrate)
+        try:
+            print("Placing mold on scale...")
+            self._scale.tare()
+            feedrate = self._get_feedrate()
+            self._machine.move(dy=38, s=feedrate)     # Move from ready position towards scale
+            self._machine.move_to(v=67, s=feedrate)  # Move well to fit under trickler
+            self._machine.gcode("M208 Z38:195")      # Move bed up so well fits under trickler, relax z-limit to do so
+            self._machine.move_to(z=38, s=feedrate)
+            self._machine.move(dy=26, s=feedrate)     # Move well under trickler    
+            self._machine.gcode("M208 Z28:195")      # Move bed up so well is resting on scale, relax z-limit to do so
+            self._machine.move_to(z=28, s=feedrate)
+            self._machine.move(dy=-1, s= feedrate)   # Back off mold so tool isn't touching
+            return True
+        except Exception as e:
+            print(f"Error placing mold on scale: {e}")
+            return False
     
     def execute_pick_mold_from_scale(
         self,
@@ -252,7 +253,7 @@ class MovementExecutor:
         ready_y: float = None,
         ready_z: float = None,
         ready_v: float = None
-    ) -> None:
+    ) -> bool:
         """
         Execute movements to pick mold from scale.
         
@@ -264,35 +265,45 @@ class MovementExecutor:
             ready_y: Y coordinate of scale ready position (required)
             ready_z: Z coordinate of scale ready position (required)
             ready_v: V coordinate of scale ready position (required)
+        
+        Returns:
+            True if successful, False otherwise.
         """
         if self._scale is None:
             raise RuntimeError("Scale not configured in MovementExecutor")
         if self._machine is None:
             raise RuntimeError("Jubilee not configured in MovementExecutor")
 
-        print("Picking mold from scale...")
-        feedrate = self._get_feedrate()
-        self._machine.move_to(z=25, s=feedrate)  # Pick up well off scale
-        self._machine.gcode("M208 Z25:195")      # Revert z-limit
-        self._machine.move(y=-25, s=feedrate)    # Move well from under trickler
-        self._machine.move_to(z=ready_z, s=feedrate)  # Move mold out from trickler
-        self._machine.gcode("M208 Z27:195")      # Restore z-limit to protect tool
-        self._machine.move_to(v=30, s=feedrate)  # Move tool to travel position
-        self._machine.move(y=-38, s=feedrate)    # Restore y position to position before well was placed
+        try:
+            print("Picking mold from scale...")
+            feedrate = self._get_feedrate()
+            self._machine.move(dy=1, s=feedrate)      # Return to model position
+            self._machine.move_to(z=38, s=feedrate)  # Pick up well off scale
+            self._machine.gcode("M208 Z38:195")      # Revert z-limit
+            self._machine.move(dy=-26, s=feedrate)    # Move well from under trickler
+            self._machine.move_to(z=ready_z, s=feedrate)  # Move mold out from trickler
+            self._machine.gcode("M208 Z38:195")      # Restore z-limit to protect tool
+            self._machine.move_to(v=30, s=feedrate)  # Move tool to travel position
+            self._machine.move(dy=-38, s=feedrate)    # Restore y position to position before well was placed
+            return True
+        except Exception as e:
+            print(f"Error picking mold from scale: {e}")
+            return False
 
     
     def execute_place_top_piston(
         self,
         piston_dispenser: PistonDispenser,
         tamper_axis: str = 'V',
-        tamper_travel_pos: float = 30.0,
+        tamper_travel_pos: float = 34.0,
         dispenser_safe_z: float = 254.0,
         ready_x: float = None,
         ready_y: float = None,
         ready_z: float = None,
         ready_v: float = None
-    ) -> None:
+    ) -> bool:
         """
+        # TODO: Do NOT RUN THIS WITH MORE THAN ONE DISPENSER AS IT CURRENTLY USES ABSOLUTE COORDINATES, NOT RELATIVE
         Execute movements to place top piston on current mold.
         
         Args:
@@ -304,40 +315,58 @@ class MovementExecutor:
             ready_y: Y coordinate of dispenser ready position (required)
             ready_z: Z coordinate of dispenser ready position (required)
             ready_v: V coordinate of dispenser ready position (required)
-        """
-        print(f"Placing top piston from dispenser {piston_dispenser.index}")
         
-        feedrate = self._get_feedrate()
-        self._machine._set_absolute_positioning()
-        self._machine.move_to(v=52, s=50)  # Fully lower mold
-        self._machine.move(z=189, s=feedrate)  # Move so mold fits under cap
-        self._machine._set_relative_positioning()
-        self._machine.move(y=35, s=feedrate)  # Move under cap dispenser
-        self._machine.move_to(v=37.3, s=50)  # Move to pick up cap
-        self._machine.move(x=piston_dispenser.x, y=piston_dispenser.y, s=feedrate)  # Return to start
-        self._machine.move_to(v=tamper_travel_pos, s=50)  # Move to travel position
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            print(f"Placing top piston from dispenser {piston_dispenser.index}")
+            
+            feedrate = self._get_feedrate()
+            feedrate_pickup = 2000 # TODO: hardcoded to minimum speed for smooth pickup, for now
+            self._machine.move_to(y=177.7, s=feedrate_pickup) # Move into dispenser to dispense piston
+            self._machine.gcode("M400") # Wait for previous command to finish
+            self._machine.gcode("G4 S2") # Wait for 2 seconds
+            self._machine.move_to(v=21, s=feedrate) # Move tool up to pickup piston
+            self._machine.move_to(y=140, s=feedrate) # Move away from dispenser
+            self._machine.move_to(v=8, s=feedrate) # Push piston into mold
+            self._machine.move_to(x=ready_x, y=ready_y, z=ready_z, v=ready_v, s=feedrate) 
+            
+            return True
+        except Exception as e:
+            print(f"Error placing top piston from dispenser {piston_dispenser.index}: {e}")
+            return False
     
     def execute_tamp(
         self,
         tamper_axis: str = 'V',
         scale_y: float = None
-    ) -> None:
+    ) -> bool:
         """
         Execute tamping movements.
         
         Args:
             tamper_axis: Axis letter for tamper (default 'V')
             scale_y: Y coordinate of the physical scale location (required for moving bed)
+        
+        Returns:
+            True if successful, False otherwise.
         """
         if scale_y is None:
             raise RuntimeError("Scale Y coordinate must be provided for tamping")
         
-        print("Executing tamp")
-        
-        self._machine._set_absolute_positioning()
-        self._machine.move_to(v=38.5, s=50)  # Prepare for tamp
-        self._machine.move(y=scale_y, s=50)  # Move from under trickler
-        self._machine.move_to(v=0, s=50)  # Move until stall detection stops movement
+        try:
+            print("Executing tamp")
+            
+            feedrate = self._get_feedrate()
+            self._machine._set_absolute_positioning()
+            self._machine.move_to(v=38.5, s=feedrate)  # Prepare for tamp
+            self._machine.move(dy=scale_y, s=feedrate)  # Move from under trickler
+            self._machine.move_to(v=0, s=feedrate)  # Move until stall detection stops movement
+            return True
+        except Exception as e:
+            print(f"Error during tamp: {e}")
+            return False
     
     # ===== BASIC MOVEMENTS =====
     
@@ -348,7 +377,7 @@ class MovementExecutor:
         z: Optional[float] = None,
         v: Optional[float] = None,
         speed: Optional[int] = None
-    ) -> None:
+    ) -> bool:
         """
         Execute a basic move to specified coordinates.
         
@@ -358,39 +387,56 @@ class MovementExecutor:
             z: Z coordinate (None to skip)
             v: V/manipulator coordinate (None to skip)
             speed: Movement speed in mm/min (None to use configured feedrate)
+        
+        Returns:
+            True if successful, False otherwise.
         """
-        if speed is None:
-            speed = self._get_feedrate()
-        self._machine.move_to(x=x, y=y, z=z, v=v, s=speed)
+        try:
+            if speed is None:
+                speed = self._get_feedrate()
+            self._machine.move_to(x=x, y=y, z=z, v=v, s=speed)
+            return True
+        except Exception as e:
+            print(f"Error executing basic move: {e}")
+            return False
     
     
-    def execute_home_all(self, registry) -> None:
-        """Home all axes and return to global_ready position."""
-        self._machine.home_all()
-        # After homing, move to global_ready position
-        global_ready_pos = registry.find_first_of_type(PositionType.GLOBAL_READY)
-        if global_ready_pos and global_ready_pos.coordinates:
-            coords = global_ready_pos.coordinates
-            # Get z height from z_heights if needed
-            z_height = None
-            if coords.z == "USE_Z_HEIGHT_POLICY":
-                # Use mold_transfer_safe z height
-                z_heights = registry.z_heights
-                if "mold_transfer_safe" in z_heights:
-                    z_config = z_heights["mold_transfer_safe"]
-                    if isinstance(z_config, dict):
-                        z_height = z_config.get("z_coordinate")
-            
-            # Move to global_ready coordinates
-            # Skip placeholders - they'll be handled by the state machine
-            x = coords.x if (coords.x is not None and (not isinstance(coords.x, str) or not coords.x.startswith("PLACEHOLDER"))) else None
-            y = coords.y if (coords.y is not None and (not isinstance(coords.y, str) or not coords.y.startswith("PLACEHOLDER"))) else None
-            z = z_height if (z_height is not None and (not isinstance(z_height, str) or not z_height.startswith("PLACEHOLDER"))) else None
-            v = coords.v if (coords.v is not None and (not isinstance(coords.v, str) or not coords.v.startswith("PLACEHOLDER"))) else None
-            
-            if x is not None or y is not None or z is not None or v is not None:
-                feedrate = self._get_feedrate()
-                self._machine.move_to(x=x, y=y, z=z, v=v, s=feedrate)
+    def execute_home_all(self, registry) -> bool:
+        """Home all axes and return to global_ready position.
+        
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            self._machine.home_all()
+            # After homing, move to global_ready position if not already there
+            global_ready_pos = registry.find_first_of_type(PositionType.GLOBAL_READY)
+            if global_ready_pos and global_ready_pos.coordinates:
+                coords = global_ready_pos.coordinates
+                # Get z height from z_heights if needed
+                z_height = None
+                if coords.z == "USE_Z_HEIGHT_POLICY":
+                    # Use mold_transfer_safe z height
+                    z_heights = registry.z_heights
+                    if "mold_transfer_safe" in z_heights:
+                        z_config = z_heights["mold_transfer_safe"]
+                        if isinstance(z_config, dict):
+                            z_height = z_config.get("z_coordinate")
+                
+                # Move to global_ready coordinates
+                # Skip placeholders - they'll be handled by the state machine
+                x = coords.x if (coords.x is not None and (not isinstance(coords.x, str) or not coords.x.startswith("PLACEHOLDER"))) else None
+                y = coords.y if (coords.y is not None and (not isinstance(coords.y, str) or not coords.y.startswith("PLACEHOLDER"))) else None
+                z = z_height if (z_height is not None and (not isinstance(z_height, str) or not z_height.startswith("PLACEHOLDER"))) else None
+                v = coords.v if (coords.v is not None and (not isinstance(coords.v, str) or not coords.v.startswith("PLACEHOLDER"))) else None
+                
+                if x is not None or y is not None or z is not None or v is not None:
+                    feedrate = self._get_feedrate()
+                    self._machine.move_to(x=x, y=y, z=z, v=v, s=feedrate)
+            return True
+        except Exception as e:
+            print(f"Error homing all axes: {e}")
+            return False
     
     def execute_pickup_tool(
         self,
@@ -419,7 +465,7 @@ class MovementExecutor:
             # Pick up the tool
             self._machine.pickup_tool(tool)
             
-            # Move to global_ready position
+            # Move to global_ready position if not already there (tool macros should return to global ready)
             global_ready_pos = registry.find_first_of_type(PositionType.GLOBAL_READY)
             if global_ready_pos and global_ready_pos.coordinates:
                 coords = global_ready_pos.coordinates
@@ -441,7 +487,8 @@ class MovementExecutor:
                 v = coords.v if (coords.v is not None and (not isinstance(coords.v, str) or not coords.v.startswith("PLACEHOLDER"))) else None
                 
                 if x is not None or y is not None or z is not None or v is not None:
-                    self._machine.move_to(x=x, y=y, z=z, v=v)
+                    feedrate = self._get_feedrate()
+                    self._machine.move_to(x=x, y=y, z=z, v=v, s=feedrate)
             
             return True
         except Exception as e:
@@ -491,34 +538,124 @@ class MovementExecutor:
                 v = coords.v if (coords.v is not None and (not isinstance(coords.v, str) or not coords.v.startswith("PLACEHOLDER"))) else None
                 
                 if x is not None or y is not None or z is not None or v is not None:
-                    self._machine.move_to(x=x, y=y, z=z, v=v)
+                    feedrate = self._get_feedrate()
+                    self._machine.move_to(x=x, y=y, z=z, v=v, s=feedrate)
             
             return True
         except Exception as e:
             print(f"Error parking tool: {e}")
             return False
     
-    def execute_home_xyz(self) -> None:
-        """Home X, Y, Z axes."""
-        self._machine.home_xyu()
-        self._machine.home_z()
-    
-    def execute_move_to_well(
-        self,
-        well: WeightWell
-    ) -> None:
+    def execute_home_xyz(self) -> bool:
+        """Home X, Y, Z axes.
+        
+        Returns:
+            True if successful, False otherwise.
         """
-        Execute movement to a specific well location.
+        try:
+            self._machine.home_xyu()
+            self._machine.home_z()
+            return True
+        except Exception as e:
+            print(f"Error homing XYZ axes: {e}")
+            return False
+    
+    def execute_move_to_well_by_id(
+        self,
+        x: float,
+        y: float,
+        z: Union[float, str, None] = None,
+        v: Optional[float] = None,
+        registry = None
+    ) -> bool:
+        """
+        Move to a specific well position using coordinates from motion_platform_positions.json.
         
         Args:
-            well: The WeightWell to move to
+            x: X coordinate of well ready position (required)
+            y: Y coordinate of well ready position (required)
+            z: Z coordinate of well ready position (optional, or "USE_Z_HEIGHT_POLICY")
+            v: V coordinate of well ready position (optional)
+            registry: PositionRegistry to resolve z heights (required if z="USE_Z_HEIGHT_POLICY")
+            
+        Returns:
+            True if successful, False otherwise
             
         Note:
             Z-height safety is enforced by state machine's z_height_policy validation.
             MOLD_READY positions require z_height_policy: allowed=['dispenser_safe', 'mold_transfer_safe']
+            
+            When z="USE_Z_HEIGHT_POLICY", the method infers the correct z height based on
+            the current machine z position:
+            - If currently at transfer height (mold_transfer_safe), use that
+            - Otherwise use dispenser height (dispenser_safe)
         """
-        feedrate = self._get_feedrate()
-        self._machine.move_to(x=well.x, y=well.y, s=feedrate)
+        try:
+            resolved_z = z
+            
+            # Handle USE_Z_HEIGHT_POLICY
+            if isinstance(z, str) and z == "USE_Z_HEIGHT_POLICY":
+                if registry is None:
+                    raise ValueError("Registry required when z=USE_Z_HEIGHT_POLICY")
+                
+                # Get current machine position
+                current_pos = self._machine.get_position()
+                current_z = float(current_pos.get('Z', 0.0))
+                
+                # Get z heights from registry
+                z_heights = registry.z_heights
+                tolerance = registry.coordinate_tolerance.get('z', 0.2)
+                
+                # Determine which z height we're currently at
+                inferred_z_height_id = None
+                
+                # Check each z height to see if current position matches
+                for z_height_id, z_config in z_heights.items():
+                    if isinstance(z_config, dict):
+                        z_coord = z_config.get("z_coordinate")
+                        if z_coord and isinstance(z_coord, (int, float)):
+                            if abs(current_z - z_coord) <= tolerance:
+                                inferred_z_height_id = z_height_id
+                                break
+                
+                # If we identified the current z height, use it
+                if inferred_z_height_id:
+                    z_config = z_heights[inferred_z_height_id]
+                    if isinstance(z_config, dict):
+                        resolved_z = z_config.get("z_coordinate")
+                        print(f"Inferred z height: {inferred_z_height_id} (z={resolved_z}mm) based on current z={current_z:.2f}mm")
+                else:
+                    # Default to dispenser_safe if we can't determine current height
+                    # This is the safer option (higher z)
+                    if "dispenser_safe" in z_heights:
+                        z_config = z_heights["dispenser_safe"]
+                        if isinstance(z_config, dict):
+                            resolved_z = z_config.get("z_coordinate")
+                            if isinstance(resolved_z, str):
+                                raise ValueError(f"dispenser_safe z_coordinate is a placeholder: '{resolved_z}'. Please configure a numeric value.")
+                            print(f"Could not infer z height from current z={current_z:.2f}mm, defaulting to dispenser_safe (z={resolved_z}mm)")
+                    elif "mold_transfer_safe" in z_heights:
+                        # Fallback to mold_transfer_safe if dispenser_safe not available
+                        z_config = z_heights["mold_transfer_safe"]
+                        if isinstance(z_config, dict):
+                            resolved_z = z_config.get("z_coordinate")
+                            if isinstance(resolved_z, str):
+                                raise ValueError(f"mold_transfer_safe z_coordinate is a placeholder: '{resolved_z}'. Please configure a numeric value.")
+                            print(f"Could not infer z height from current z={current_z:.2f}mm, defaulting to mold_transfer_safe (z={resolved_z}mm)")
+                    else:
+                        raise ValueError(f"No suitable z height found in registry for current z={current_z:.2f}mm")
+                
+                # Final validation that resolved_z is numeric
+                if not isinstance(resolved_z, (int, float)):
+                    raise ValueError(f"Resolved z coordinate is not numeric: {resolved_z} (type: {type(resolved_z).__name__})")
+            
+            feedrate = self._get_feedrate()
+            self._machine.move_to(x=x, y=y, z=resolved_z, v=v, s=feedrate)
+            return True
+        except Exception as e:
+            print(f"Error moving to well: {e}")
+            print (f"Coordinate: x={x}, y={y}, z={z}, v={v}")
+            return False
     
     def execute_move_to_scale(
         self,
@@ -526,7 +663,7 @@ class MovementExecutor:
         ready_y: float,
         ready_z: float,
         ready_v: float
-    ) -> None:
+    ) -> bool:
         """
         Execute movement to the scale ready location.
         
@@ -539,9 +676,17 @@ class MovementExecutor:
         Note:
             Z-height safety is enforced by state machine's z_height_policy validation.
             SCALE_READY position requires z_height_policy: allowed=['dispenser_safe', 'mold_transfer_safe']
+        
+        Returns:
+            True if successful, False otherwise.
         """
-        feedrate = self._get_feedrate()
-        self._machine.move_to(x=ready_x, y=ready_y, z=ready_z, v=ready_v, s=feedrate)
+        try:
+            feedrate = self._get_feedrate()
+            self._machine.move_to(x=ready_x, y=ready_y, z=ready_z, v=ready_v, s=feedrate)
+            return True
+        except Exception as e:
+            print(f"Error moving to scale ready position: {e}")
+            return False
     
     def get_machine_position(self) -> dict:
         """Get current machine position."""
@@ -550,65 +695,6 @@ class MovementExecutor:
     def get_machine_axes_homed(self) -> list:
         """Get list of which axes are homed."""
         return getattr(self._machine, 'axes_homed', [False, False, False, False])
-        
-    def execute_move_to_well_by_id(
-        self,
-        well_id: str,
-        deck
-    ) -> bool:
-        """
-        Move to a specific well by well ID.
-        
-        Moved from JubileeManager._move_to_well()
-        
-        Args:
-            well_id: Well identifier (e.g., "A1")
-            deck: The Deck object with well configuration (from state machine's context)
-            
-        Returns:
-            True if successful, False otherwise
-            
-        Note:
-            Z-height safety is enforced by state machine's z_height_policy validation.
-            MOLD_READY positions require z_height_policy: allowed=['dispenser_safe', 'mold_transfer_safe']
-        """
-        try:
-            # Get well from deck
-            row = ord(well_id[0].upper()) - ord('A')
-            col = int(well_id[1:]) - 1
-            
-            # Calculate slot index based on row
-            if row == 0:  # Row A: slots 0-6
-                slot_index = col
-            elif row == 1:  # Row B: slots 7-13
-                slot_index = 7 + col
-            elif row == 2:  # Row C: slots 14-17
-                slot_index = 14 + col
-            else:
-                return False
-            
-            if str(slot_index) not in deck.slots:
-                return False
-            
-            slot = deck.slots[str(slot_index)]
-            if not slot.has_labware or not hasattr(slot.labware, 'wells'):
-                return False
-            
-            # Get the well
-            well = None
-            for w in slot.labware.wells.values():
-                well = w
-                break
-            
-            if not well or not well.valid:
-                return False
-            
-            feedrate = self._get_feedrate()
-            self._machine.move_to(x=well.x, y=well.y, s=feedrate)
-            return True
-        except Exception as e:
-            print(f"Error moving to well: {e}")
-            return False
     
     def execute_move_to_scale_location(
         self,
@@ -659,8 +745,9 @@ class MovementExecutor:
             True if successful, False otherwise
         """
         try:
+            self._machine.gcode("M400") # Ensure all other actions have finished so mold is actually under trickler
              # Determine feedrate string for G-code
-            feedrate_str = str(self._get_feedrate())
+            feedrate_str = str("F200")
             
             threshold_90_percent = 0.9 * target_weight
             max_step_size = 4                           # Maximum step size when weight is very low
@@ -669,11 +756,13 @@ class MovementExecutor:
             
             # Track if threshold crossed
             threshold_crossed = False
-            self._scale.connect() # TODO: This connect is only TEMPORARY until full jubileemanager setup/teardown is used
+            time.sleep(2) # Wait 1 second to stabilize
             self._scale.tare()
+            initial_weight = self._scale.get_weight(stable=True)
 
             print(f"Target: {target_weight:.4f}g, 90% threshold: {threshold_90_percent:.4f}g\n")
             self._machine.gcode("G92 W0") # Reset trickler axis
+            self._machine.gcode("G91") # Set relative positioning mode
             
             iteration = 0
             while True:
@@ -691,7 +780,7 @@ class MovementExecutor:
                     
                     # Keep vibration off
                     # Move -> unstable weight -> move
-                    self._machine.gcode(f"G1 W{feedback_step_size}{feedrate_str}")
+                    self._machine.gcode(f"G1 W{feedback_step_size} {feedrate_str}")
                     self._machine.gcode("M400")
                     time.sleep(0.2)                         # Small sleep to promote scale settling
                     
@@ -731,10 +820,10 @@ class MovementExecutor:
                     # Below 90% threshold: big movements with vibration, stable measurements after each
                     # Linear decrease: step_size decreases smoothly as weight approaches 90% threshold
                     progress = max(0, current_weight / threshold_90_percent)  # 0 to 1
-                    step_size = max_step_size - (max_step_size - min_step_size) * progress
+                    step_size = max_step_size - ((max_step_size - min_step_size) * progress)
                     
                     # Move with vibration
-                    self._machine.gcode("M42 P0 S0.10 F20000") # Turn on vibration
+                    self._machine.gcode("M42 P0 S0.5 F20000") # Turn on vibration
                     time.sleep(0.33)
                     self._machine.gcode(f"G1 W{step_size}{feedrate_str}")
                     self._machine.gcode("M400")
@@ -750,9 +839,17 @@ class MovementExecutor:
                         
                     except Exception as e:
                         print(f"Error reading weight at iteration {iteration}: {e}")
+            
+            # Restore absolute positioning mode
+            self._machine.gcode("G90")
             return True
         except Exception as e:
             print(f"Error dispensing powder: {e}")
+            # Restore absolute positioning mode on error
+            try:
+                self._machine.gcode("G90")
+            except:
+                pass
             return False
         
     def execute_home_tamper(

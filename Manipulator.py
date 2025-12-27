@@ -136,64 +136,89 @@ class Manipulator(Tool):
     # throughout this class, including gcode commands.
     # ============================================================================
     
-    # The tamper axis should be returned to this position after any functions that move the tamper complete
-    TAMP_AXIS_TRAVEL_POS = 30 # mm
-
-    # TODO: THIS VALUE USED FOR NO DISPENSER TESTING, DO NOT USE WITH DISPENSER
-    DISPENSER_SAFE_Z = 90 # mm, z should be set to this height before moving to cap dispenser ready point or gantry will hit trickler
-    SAFE_Z = 90 # mm
-
-    def __init__(self, index, name, state_machine=None, config=None):
+ 
+    def __init__(self, index, name, state_machine=None, config_source=None):
         super().__init__(index, name)
         self.state_machine = state_machine  # Reference to MotionPlatformStateMachine
-        self.config = config
         
-        # Tamper-specific attributes
+        # Tamper axis configuration (loaded from system_config.json)
         self.tamper_axis = 'V'  # Default axis for tamper movement
-        self.tamper_driver = 0  # Default driver number for tamper motor
-        self.tamper_board_address = 0  # Default board address
+        
+        # Status flags
         self.stall_detection_configured = False
         self.sensorless_homing_configured = False
-        self.tamper_motor_specs = {
-            'full_steps_per_rev': 200,  # 1.8 degree stepper
-            'rated_current': 1.5,  # Amps
-            'actual_current': 1.0,  # Amps (reduced for stall detection)
-            'rated_holding_torque': 0.4,  # Nm
-            'driver_type': 'TMC2209'  # Driver type for configuration
-        }
         
-        self.tamper_speed = 1000  # mm/min for tamper movement
-        self.tamper_acceleration = 500  # mm/s² for tamper movement
+        # TODO: tamper_speed should be derived from state machine feedrate default
+        # For now, removed as it was only used in get_status() for reporting
 
-        # Load configuration if provided
-        if config:
-            self._load_tamper_config(config)
+        
+        # Load configuration from system_config.json if not provided
+        if config_source is None:
+            config_source = "system_config"
+        
+        config_dict = self._load_config(config_source)
+        if config_dict:
+            self._load_manipulator_config(config_dict)
 
-    def _load_tamper_config(self, config: Dict[str, Any]):
-        """Load tamper-specific configuration from config dict."""
-        tamper_config = config.get('tamper', {})
+    def _load_config(self, config_source_param) -> Optional[Dict[str, Any]]:
+        """
+        Load configuration from either a file path string or a dict.
         
-        # Load motor specifications
-        motor_specs = tamper_config.get('motor_specs', {})
-        for key, value in motor_specs.items():
-            if key in self.tamper_motor_specs:
-                self.tamper_motor_specs[key] = value
+        Args:
+            config_source_param: Either a string (path to JSON file) or a dict (already loaded config)
+            
+        Returns:
+            Configuration dictionary, or None if loading failed
+        """
+        if isinstance(config_source_param, dict):
+            # Config is already a dictionary
+            return config_source_param
+        elif isinstance(config_source_param, str):
+            # Config is a file path - load from JSON
+            try:
+                # Try as relative path from jubilee_api_config
+                config_path = os.path.join("jubilee_api_config", f"{config_source_param}.json")
+                if not os.path.exists(config_path):
+                    # Try as absolute or relative path as-is
+                    config_path = config_source_param
+                    if not config_path.endswith('.json'):
+                        config_path = f"{config_path}.json"
+                
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except FileNotFoundError:
+                raise FileNotFoundError("Could not find Manipulator configuration file")
+            except json.JSONDecodeError as e:
+                raise(f"Error: Invalid JSON in manipulator config file: {config_path}")
+                print(f"JSON Error: {e}")
+                raise json.JSONDecodeError("")
+            except Exception as e:
+                print(f"Error loading manipulator config: {e}")
+                raise Exception()
+                return None
+        else:
+            print(f"Warning: Invalid config type: {type(config_source_param)}. Expected str or dict.")
+            print("Exiting program.")
+            exit()
+    
+    def _load_manipulator_config(self, config_data: Dict[str, Any]):
+        """Load manipulator-specific configuration from config dict (only tamper_axis)."""
+        manipulator_config = config_data.get('manipulator', {})
         
-        # Load movement parameters
-        movement_config = tamper_config.get('movement', {})
-        self.tamper_axis = movement_config.get('axis', self.tamper_axis)
-        self.tamper_driver = movement_config.get('driver', self.tamper_driver)
-        self.tamper_board_address = movement_config.get('board_address', self.tamper_board_address)
-        self.tamper_speed = movement_config.get('speed', self.tamper_speed)
-        self.tamper_acceleration = movement_config.get('acceleration', self.tamper_acceleration)
+        # Only load tamper axis
+        self.tamper_axis = manipulator_config.get('tamper_axis', self.tamper_axis)
     
     def _get_config_dict(self) -> Dict[str, Any]:
-        """Helper to package manipulator configuration for state machine calls."""
+        """
+        Helper to package manipulator configuration for state machine calls.
+        
+        Note: Only returns tamper_axis now. State machine should provide:
+        - tamper_travel_pos (from motion_platform_positions.json z_heights)
+        - safe_z (from motion_platform_positions.json z_heights)
+        - dispenser_safe_z (from motion_platform_positions.json z_heights)
+        """
         return {
             'tamper_axis': self.tamper_axis,
-            'tamper_travel_pos': self.TAMP_AXIS_TRAVEL_POS,
-            'safe_z': self.SAFE_Z,
-            'dispenser_safe_z': self.DISPENSER_SAFE_Z,
         }
     
     @property
@@ -278,14 +303,7 @@ class Manipulator(Tool):
             'has_mold': self.current_well is not None,
             'stall_detection_configured': self.stall_detection_configured,
             'sensorless_homing_configured': self.sensorless_homing_configured,
-            'motor_specs': self.tamper_motor_specs.copy(),
-            'movement_parameters': {
-                'axis': self.tamper_axis,
-                'driver': self.tamper_driver,
-                'board_address': self.tamper_board_address,
-                'speed': self.tamper_speed,
-                'acceleration': self.tamper_acceleration
-            }
+            'tamper_axis': self.tamper_axis,
         }
         
         if self.current_well is not None:
@@ -328,7 +346,7 @@ class Manipulator(Tool):
         Validates move through state machine before execution.
         
         Args:
-            well_id: Well identifier (e.g., "A1")
+            well_id: Well identifier (numerical string "0" through "17")
         """
         if not self.state_machine:
             raise RuntimeError("State machine not configured")

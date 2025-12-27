@@ -5,12 +5,12 @@ class PistonDispenser:
     """
     index : int      # index of the dispenser on the side of the Jubilee
     num_pistons: int # number of pistons in the dispenser
-    x: float         # x coordinate of the dispenser
-    y: float         # y coordinate of the dispenser
+    ready_pos: str   # State machine position name (e.g., "dispenser_ready_0")
 
     def __init__(self, index, num_pistons):
         self.index = index
         self.num_pistons = num_pistons
+        self.ready_pos = f"dispenser_ready_{index}"  # Set ready_pos based on index
 
     def remove_piston(self):
         if self.num_pistons > 0:

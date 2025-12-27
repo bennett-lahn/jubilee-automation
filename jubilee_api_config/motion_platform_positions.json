@@ -1,19 +1,15 @@
 {
   "z_heights": {
-    "dispenser_safe": {
-      "description": "Clearance suitable for dispenser operations.",
-      "z_coordinate": "PLACEHOLDER_DISPENSER_SAFE_Z"
-    },
     "mold_transfer_safe": {
-      "description": "Clearance for mold transfer, scale, and global readiness.",
-      "z_coordinate": "PLACEHOLDER_MOLD_TRANSFER_SAFE_Z"
+      "description": "Clearance for mold transfer, scale, and global readiness. Gantry will not collide with trickler, but tool can.",
+      "z_coordinate": 95.0
     }
   },
   "coordinate_tolerance": {
-    "x": 0.5,
-    "y": 0.5,
-    "z": 0.5,
-    "v": 0.5,
+    "x": 0.2,
+    "y": 0.2,
+    "z": 0.2,
+    "v": 0.2,
     "description": "Maximum allowed deviation (in mm or degrees) from expected coordinates"
   },
   "positions": [
@@ -23,10 +19,10 @@
       "description": "Global clearance position safe for most traversals.",
       "allows_tool_engagement": false,
       "coordinates": {
-        "x": "PLACEHOLDER_GLOBAL_X",
-        "y": "PLACEHOLDER_GLOBAL_Y",
+        "x": 150.0,
+        "y": 80.0,
         "z": "USE_Z_HEIGHT_POLICY",
-        "v": "PLACEHOLDER_GLOBAL_V"
+        "v": 30.0
       },
       "allowed_origins": [
         "GLOBAL_READY",
@@ -43,7 +39,6 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       }
@@ -53,24 +48,30 @@
       "type": "SCALE_READY",
       "description": "Ready position above the scale for mold handling.",
       "allows_tool_engagement": true,
+      "coordinates": {
+        "x": 150.0,
+        "y": 80.0,
+        "z": "USE_Z_HEIGHT_POLICY",
+        "v": 30.0
+      },
       "allowed_origins": [
         "SCALE_READY",
         "GLOBAL_READY",
-        "MOLD_READY"
+        "MOLD_READY",
+        "scale_active"
       ],
       "allowed_destinations": [
         "SCALE_READY",
         "GLOBAL_READY",
-        "MOLD_READY"
+        "MOLD_READY",
+        "scale_active"
       ],
       "requirements": {
         "active_tool_id": "manipulator",
-        "payload_state": "mold_without_cap",
-        "tool_pose": "safe"
+        "payload_state": "mold_without_cap"
       },
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
@@ -78,6 +79,40 @@
         "requirements": {
           "active_tool_id": "manipulator",
           "payload_state": "mold_without_cap"
+        },
+        "allowed_actions": []
+      }
+    },
+    {
+      "id": "scale_active",
+      "type": "SCALE_READY",
+      "description": "Active position with mold physically on the scale, under the trickler.",
+      "allows_tool_engagement": true,
+      "coordinates": {
+        "x": 150.0,
+        "y": 143.0,
+        "z": 28.0,
+        "v": 67.0
+      },
+      "allowed_origins": [
+        "SCALE_READY"
+      ],
+      "allowed_destinations": [
+        "SCALE_READY"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_cap",
+        "mold_on_scale": true
+      },
+      "z_height_policy": {
+        "allowed": []
+      },
+      "engagement": {
+        "requirements": {
+          "active_tool_id": "manipulator",
+          "payload_state": "mold_without_cap",
+          "mold_on_scale": true
         },
         "allowed_actions": [
           "trickler_dispense"
@@ -89,15 +124,21 @@
       "type": "DISPENSER_READY",
       "description": "Ready position for dispenser station 0.",
       "allows_tool_engagement": true,
+      "coordinates": {
+        "x": 298.0,
+        "y": 140.0,
+        "z": 95.0,
+        "v": 34.0
+      },
       "allowed_origins": [
         "DISPENSER_READY",
         "GLOBAL_READY",
-        "MOLD_READY"
+        "SCALE_READY"
       ],
       "allowed_destinations": [
         "DISPENSER_READY",
         "GLOBAL_READY",
-        "MOLD_READY"
+        "SCALE_READY"
       ],
       "requirements": {
         "active_tool_id": "manipulator",
@@ -105,9 +146,9 @@
       },
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe"
+          "mold_transfer_safe"
         ],
-        "required": "dispenser_safe"
+        "required": "mold_transfer_safe"
       },
       "engagement": {
         "requirements": {
@@ -121,15 +162,21 @@
       "type": "DISPENSER_READY",
       "description": "Ready position for dispenser station 1.",
       "allows_tool_engagement": true,
+      "coordinates": {
+        "x": 362.5,
+        "y": 337.0,
+        "z": "USE_Z_HEIGHT_POLICY",
+        "v": 30.0
+      },
       "allowed_origins": [
         "DISPENSER_READY",
         "GLOBAL_READY",
-        "MOLD_READY"
+        "SCALE_READY"
       ],
       "allowed_destinations": [
         "DISPENSER_READY",
         "GLOBAL_READY",
-        "MOLD_READY"
+        "SCALE_READY"
       ],
       "requirements": {
         "active_tool_id": "manipulator",
@@ -137,9 +184,9 @@
       },
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe"
+          "mold_transfer_safe"
         ],
-        "required": "dispenser_safe"
+        "required": "mold_transfer_safe"
       },
       "engagement": {
         "requirements": {
@@ -168,12 +215,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -196,12 +244,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -224,12 +273,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -252,12 +302,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -280,12 +331,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -308,12 +360,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -336,12 +389,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -364,12 +418,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -392,12 +447,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -420,18 +476,25 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
       "id": "mold_ready_10",
       "type": "MOLD_READY",
       "description": "Ready position for mold slot 10.",
+      "coordinates": {
+        "x": 150.0,
+        "y": 40.0,
+        "z": "USE_Z_HEIGHT_POLICY",
+        "v": 30.0
+      },
       "allows_tool_engagement": true,
       "allowed_origins": [
         "MOLD_READY",
@@ -448,12 +511,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -476,12 +540,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -504,12 +569,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -532,12 +598,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -560,12 +627,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     },
     {
@@ -588,12 +656,13 @@
       "requirements": {},
       "z_height_policy": {
         "allowed": [
-          "dispenser_safe",
           "mold_transfer_safe"
         ]
       },
       "engagement": {
-        "requirements": {}
+        "requirements": {
+          "active_tool_id": "manipulator"
+        }
       }
     }
   ],
@@ -604,7 +673,7 @@
       "requires_tool_engaged": true,
       "required_tool_id": "manipulator",
       "position_scope": [
-        "scale_ready"
+        "scale_active"
       ],
       "requirements": {
         "active_tool_id": "manipulator",
@@ -714,7 +783,7 @@
     },
     {
       "id": "home_all",
-      "description": "Home all axes (X, Y, Z, U). Can be conducted from any position, but requires no tool picked up and no mold. Returns machine to global_ready position.",
+      "description": "Home all axes (X, Y, Z, U). Can be conducted from any position (typical), but requires no tool picked up and no mold. Returns machine to global_ready position.",
       "blocked_when_engaged": true,
       "position_scope": [],
       "requirements": {
@@ -745,8 +814,7 @@
       "description": "Pick up the manipulator tool and return to global_ready position. Valid from mold_ready or global_ready positions. Requires no tool already picked up and mold_transfer_safe z_height.",
       "blocked_when_engaged": true,
       "position_scope": [
-        "GLOBAL_READY",
-        "MOLD_READY"
+        "GLOBAL_READY"
       ],
       "requirements": {
         "payload_state": "empty",
@@ -762,12 +830,39 @@
       "blocked_when_engaged": true,
       "required_tool_id": "manipulator",
       "position_scope": [
-        "GLOBAL_READY",
-        "MOLD_READY"
+        "GLOBAL_READY"
       ],
       "requirements": {
         "active_tool_id": "manipulator",
-        "payload_state": "empty"
+        "payload_state": "empty",
+        "z_height_id": "mold_transfer_safe"
+      }
+    },
+    {
+      "id": "place_mold_on_scale",
+      "description": "Place a held mold onto the scale. Must be at scale_ready position with manipulator tool holding a mold without top piston.",
+      "blocked_when_engaged": true,
+      "required_tool_id": "manipulator",
+      "position_scope": [
+        "scale_ready"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_cap"
+      }
+    },
+    {
+      "id": "pick_mold_from_scale",
+      "description": "Pick up a mold from the scale. Must be at scale_active position with manipulator tool engaged and mold on scale.",
+      "requires_tool_engaged": true,
+      "required_tool_id": "manipulator",
+      "position_scope": [
+        "scale_active"
+      ],
+      "requirements": {
+        "active_tool_id": "manipulator",
+        "payload_state": "mold_without_cap",
+        "mold_on_scale": true
       }
     }
   ]

@@ -6,7 +6,7 @@
     },
     "offsetFrom": "top-left",
     "deck_material": "aluminum",
-    "safe_z": 195,
+    "safe_z": 0,
     "slots": {
         "0": {
             "offset": [296.6, 26.8],

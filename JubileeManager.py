@@ -115,11 +115,11 @@ class JubileeManager:
             )
 
             # Create manipulator with state machine reference
+            # Config will default to system_config.json
             self.manipulator = Manipulator(
                 index=0,
                 name="manipulator",
-                state_machine=self.state_machine,
-                config="manipulator_config"
+                state_machine=self.state_machine
             )
 
             # Ensure state machine context is set correctly for homing
@@ -243,9 +243,7 @@ class JubileeManager:
             
             # Move to dispenser position through state machine
             result = self.state_machine.validated_move_to_dispenser(
-                dispenser_index=dispenser_index,
-                dispenser_x=piston_dispenser.x,
-                dispenser_y=piston_dispenser.y
+                piston_dispenser=piston_dispenser
             )
             
             if not result.valid:

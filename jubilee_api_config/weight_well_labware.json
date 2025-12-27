@@ -1,39 +1,5 @@
 {
-    "name": "Weight Well",
-    "version": 1,
-    "description": "A single weight well for powder dispensing",
-    "namespace": "jubilee_automation",
-    "dimensions": {
-        "xDimension": 20,
-        "yDimension": 20,
-        "zDimension": 10
-    },
-    "wells": {
-        "0": {"x": 296.6, "y": 26.8, "z": 0},
-        "1": {"x": 253.35, "y": 26.8, "z": 0},
-        "2": {"x": 210.1, "y": 26.8, "z": 0},
-        "3": {"x": 166.85, "y": 26.8, "z": 0},
-        "4": {"x": 123.6, "y": 26.8, "z": 0},
-        "5": {"x": 80.35, "y": 26.8, "z": 0},
-        "6": {"x": 37.1, "y": 26.8, "z": 0},
-        "7": {"x": 296.6, "y": 111.3, "z": 0},
-        "8": {"x": 253.35, "y": 111.3, "z": 0},
-        "9": {"x": 210.1, "y": 111.3, "z": 0},
-        "10": {"x": 166.85, "y": 111.3, "z": 0},
-        "11": {"x": 123.6, "y": 111.3, "z": 0},
-        "12": {"x": 80.35, "y": 111.3, "z": 0},
-        "13": {"x": 37.1, "y": 111.3, "z": 0},
-        "14": {"x": 296.6, "y": 195.8, "z": 0},
-        "15": {"x": 253.35, "y": 195.8, "z": 0},
-        "16": {"x": 80.35, "y": 195.8, "z": 0}
-    },
-    "groups": {
-        "wells": {
-            "A1": ["A1"], "A2": ["A2"], "A3": ["A3"], "A4": ["A4"], "A5": ["A5"], "A6": ["A6"], "A7": ["A7"],
-            "B1": ["B1"], "B2": ["B2"], "B3": ["B3"], "B4": ["B4"], "B5": ["B5"], "B6": ["B6"], "B7": ["B7"],
-            "C1": ["C1"], "C2": ["C2"], "C3": ["C3"], "C4": ["C4"]
-        }
-    },
+    "ordering": [["A0"], ["A1"], ["A2"], ["A3"], ["A4"], ["A5"], ["A6"], ["A7"], ["A8"], ["A9"], ["A10"], ["A11"], ["A12"], ["A13"], ["A14"], ["A15"], ["A16"], ["A17"]],
     "brand": {
         "brand": "Jubilee Automation",
         "brandId": ["weight_well"]
@@ -42,5 +8,50 @@
         "displayName": "Weight Well",
         "displayCategory": "well",
         "displayVolumeUnits": "g"
+    },
+    "dimensions": {
+        "xDimension": 20,
+        "yDimension": 20,
+        "zDimension": 10
+    },
+    "wells": {
+        "A0": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A1": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A2": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A3": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A4": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A5": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A6": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A7": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A8": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A9": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A10": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A11": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A12": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A13": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A14": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A15": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A16": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0},
+        "A17": {"depth": 10, "totalLiquidVolume": 1000, "shape": "circular", "diameter": 20, "x": 0, "y": 0, "z": 0}
+    },
+    "groups": [
+        {
+            "metadata": {"wellBottomShape": "flat"},
+            "wells": ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11", "A12", "A13", "A14", "A15", "A16", "A17"]
+        }
+    ],
+    "parameters": {
+        "format": "irregular",
+        "isTiprack": false,
+        "isMagneticModuleCompatible": false,
+        "loadName": "weight_well_labware"
+    },
+    "namespace": "jubilee_automation",
+    "version": 1,
+    "schemaVersion": 2,
+    "cornerOffsetFromSlot": {
+        "x": 0,
+        "y": 0,
+        "z": 0
     }
 }

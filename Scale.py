@@ -2,7 +2,8 @@ import time
 import serial
 from enum import Enum
 
-MAX_WEIGHT = 10 # Immediately throw error if measured weight after taring exceeds this value; container may be overloaded
+MAX_WEIGHT = 1000 # Immediately throw error if measured weight after taring exceeds this value; container may be overloaded
+# TODO: Update this to reasonable value once testing is over
 
 CR = '\r'
 LF = '\n'
@@ -153,9 +154,6 @@ class Scale:
         self.timeout = timeout
         self.serial = None
         self._is_connected = False
-        self.x = ... # x coordinate of the scale
-        self.y = ... # y coordinate of the scale
-        self.z = ... # z coordinate of the scale
 
     def connect(self):
         """

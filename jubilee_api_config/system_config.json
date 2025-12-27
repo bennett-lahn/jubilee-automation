@@ -1,17 +1,14 @@
 {
     "safety": {
-        "safe_z": 195,
-        "safe_z_offset": 20,
         "max_weight_per_well": 10.0,
         "weight_tolerance": 0.001
     },
     "machine": {
         "duet_ip": "192.168.1.2",
-        "default_feedrate": 3000,
-        "tamper_travel_position": 30,
-        "tamper_working_position": 50
+        "default_feedrate": 300,
+        "tamper_travel_position": 30
     },
-    "wells": {
-        
+    "manipulator": {
+        "tamper_axis": "V"
     }
 }
