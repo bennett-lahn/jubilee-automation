@@ -35,7 +35,7 @@ M950 E0 C"led" T1 Q3000000   ; create a RGB Neopixel LED strip on the LED port a
 M584 X1.0 Y1.1            ; X and Y for CoreXY
 M584 U1                   ; U for toolchanger lock
 M584 Z2:3:4               ; Z has three drivers for kinematic bed suspension. 
-M584 W1.2 R1              ; Scale axis
+M584 W1.2                 ; Trickler axis
 M584 V0.0                 ; Manipulator axis
 
 
@@ -71,10 +71,10 @@ M669 K1                   ; CoreXY mode
 ; Kinematic bed ball locations.
 ; Locations are extracted from CAD model assuming lower left build plate corner
 ; is (0, 0) on a 305x305mm plate.
-M671 X297.5:2.5:150 Y313.5:313.5:-16.5 S5  ; Front Left: (297.5, 313.5)
+M671 X297.5:2.5:150 Y313.5:313.5:-16.5 S7  ; Front Left: (297.5, 313.5)
                                            ; Front Right: (2.5, 313.5)
                                            ; Back: (150, -16.5)
-                                           ; Up to 5mm correction
+                                           ; Up to 7mm correction
 
 
 ; Axis and motor configuration 
@@ -115,13 +115,13 @@ M566 W80                               ; Scale jerk (deg/min)
 
 ; Servos
 ;-------------------------------------------------------------------------------
-M950 S0 C"laser" ; assign GPIO port 0 to LASER/VFD port, servo mode for the trickler servo
+M950 S0 C"laser" ; assign GPIO port 0 to LASER/VFD port, servo motor for the trickler servo
 
 ; Trickler Vibrator
 ;-------------------------------------------------------------------------------
 
 ; Allocate a GPIO port on OUT_3 at 100 Hz PWM
-M950 P0 C"out3" Q20000      ; P0 = GpOut port 0, C"out4" = use OUT_4, Q100 = 100 Hz
+M950 P0 C"out3" Q20000      ; P0 = GpOut port 0, C"out4" = use OUT_4, Q100 = 20000 Hz
 
 ; Endstops and probes 
 ;-------------------------------------------------------------------------------
@@ -132,7 +132,7 @@ M574 V1 S1 P"^io5.in"    ; Manipulator
 
 
 M574 Z0                  ; we will use the switch as a Z probe not endstop 
-M558 P8 C"io0.in" H3 F360 T6000 ; H = dive height F probe speed T travel speed
+M558 P8 C"io0.in" H5 F360 T6000 ; H = dive height F probe speed T travel speed
 G31 K0 X0 Y0 Z-2         ; Set the limit switch as the "Control Point"
                          ; Offset it downwards slightly so we don't smear it 
                          ; along the bed while traveling when z=0
@@ -140,7 +140,7 @@ G31 K0 X0 Y0 Z-2         ; Set the limit switch as the "Control Point"
 ; Set axis software limits and min/max switch-triggering positions.
 ; Adjusted such that (0,0) lies at the lower left corner of a 300x300mm square 
 ; in the 305mmx305mm build plate.
-M208 X-13.75:313.75 Y-44:341 Z0:295 V0:67
+M208 X-13.75:313.75 Y-44:341 Z0:150 V0:67
 M208 U0:200            ; Set Elastic Lock (U axis) max rotation angle
 M208 W-5000000:5000000 ; Set scale rotational axis to be arbitrarily large. 
 
